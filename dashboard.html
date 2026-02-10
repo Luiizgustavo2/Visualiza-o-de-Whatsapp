@@ -31,7 +31,8 @@
         const SUPABASE_URL ='https://zocvshviimdzaourupau.supabase.co';
         const SUPABASE_KEY ='sb_publishable_AQ1RRrRoOptDXQRu4gxnjA_kj6lN57t';
 
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        // Mudamos o nome para 'client' para não confundir
+        const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         async function carregarPedidos() {
             const container = document.getElementById('lista-pedidos');
@@ -96,4 +97,5 @@
         carregarPedidos();
     </script>
 </body>
+
 </html>
