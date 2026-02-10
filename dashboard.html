@@ -26,11 +26,10 @@
         .bubble-user { background-color: #374151; color: #fff; align-self: flex-start; border-top-left-radius: 0; }
         .bubble-order { background-color: #422006; color: #fde047; align-self: flex-end; border-top-right-radius: 0; border: 1px solid #ca8a04; }
         
-        /* Separador de Data */
-        .date-divider { display: flex; justify-content: center; margin: 15px 0; }
+        /* Divisor de Data (Novo!) */
+        .date-divider { display: flex; justify-content: center; margin: 20px 0 10px 0; }
         .date-badge { background-color: #1e293b; color: #94a3b8; font-size: 11px; padding: 4px 12px; border-radius: 99px; border: 1px solid #334155; text-transform: uppercase; font-weight: bold; }
 
-        /* Ocultar scrollbar mas permitir rolagem */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
@@ -103,7 +102,6 @@
     </button>
 
     <script>
-        // CONFIGURAÇÃO
         const SUPABASE_URL = 'https://zocvshviimdzaourupau.supabase.co';
         const SUPABASE_KEY = 'sb_publishable_AQ1RRrRoOptDXQRu4gxnjA_kj6lN57t';
         const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -115,18 +113,12 @@
 
         function init() {
             refreshData();
-            
-            // 1. REALTIME (Tenta ser rápido)
+            // 1. Realtime
             client.channel('any').on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, () => {
-                console.log("⚡ Mudança detectada (Realtime)");
                 refreshData();
             }).subscribe();
-
-            // 2. BACKUP AUTOMÁTICO (Adeus F5 - Roda a cada 4 segundos)
-            setInterval(() => {
-                console.log("🔄 Auto-atualização (Backup)");
-                refreshData();
-            }, 4000);
+            // 2. Backup Anti-F5
+            setInterval(() => { refreshData(); }, 4000);
         }
 
         async function refreshData() {
@@ -156,7 +148,7 @@
             document.getElementById('count-street').innerText = street;
         }
 
-        // --- DASHBOARD (COZINHA) ---
+        // --- DASHBOARD ---
         function renderDashboard() {
             const grid = document.getElementById('grid-cards');
             grid.innerHTML = '';
@@ -217,6 +209,7 @@
                         name: d.cliente_nome,
                         phone: d.whatsapp_numero,
                         lastMsgDate: d.created_at,
+                        // Mostra o texto real da conversa na prévia
                         preview: d.status === 'log_conversa' ? (d.itens?.mensagem || 'Mensagem') : '📝 Pedido realizado',
                         raw: []
                     };
@@ -265,51 +258,40 @@
             renderMessages(messages);
         }
 
-        // --- FUNÇÃO AUXILIAR PARA FORMATAR DATA (HOJE, ONTEM, ETC) ---
-        function formatDateLabel(dateStr) {
-            const d = new Date(dateStr);
-            const today = new Date();
-            const yesterday = new Date();
-            yesterday.setDate(today.getDate() - 1);
-
-            if (d.toLocaleDateString() === today.toLocaleDateString()) return "HOJE";
-            if (d.toLocaleDateString() === yesterday.toLocaleDateString()) return "ONTEM";
-            return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' }).toUpperCase();
-        }
-
-        // --- RENDERIZA MENSAGENS COM DIVISOR DE DATA ---
+        // --- RENDERIZAÇÃO INTELIGENTE COM DATAS ---
         function renderMessages(messages) {
             const container = document.getElementById('chat-messages');
             container.innerHTML = '';
             
-            // Ordena: Mais antigo em cima
             const sorted = messages.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-
-            let lastDate = null;
+            let lastDateLabel = "";
 
             sorted.forEach(msg => {
+                // FILTRO: Não mostra 'concluido' ou 'em_entrega' pra não poluir
                 if (msg.status === 'concluido' || msg.status === 'em_entrega') return;
 
-                // LÓGICA DO DIVISOR DE DATA
-                const msgDateObj = new Date(msg.created_at);
-                const msgDateStr = msgDateObj.toLocaleDateString();
+                const msgDate = new Date(msg.created_at);
+                const time = msgDate.toLocaleTimeString().slice(0,5);
+                const dateLabel = formatDateLabel(msg.created_at);
 
-                if (msgDateStr !== lastDate) {
-                    const separator = document.createElement('div');
-                    separator.className = 'date-divider';
-                    separator.innerHTML = `<span class="date-badge">${formatDateLabel(msg.created_at)}</span>`;
-                    container.appendChild(separator);
-                    lastDate = msgDateStr;
+                // Insere Divisor de Data se mudou o dia
+                if (dateLabel !== lastDateLabel) {
+                    const divider = document.createElement('div');
+                    divider.className = "date-divider";
+                    divider.innerHTML = `<span class="date-badge">${dateLabel}</span>`;
+                    container.appendChild(divider);
+                    lastDateLabel = dateLabel;
                 }
 
                 const div = document.createElement('div');
-                const time = msgDateObj.toLocaleTimeString().slice(0,5);
                 
                 if (msg.status === 'log_conversa') {
+                    // MENSAGEM DO CLIENTE (TEXTO)
                     div.className = "bubble bubble-user";
                     let texto = msg.itens?.mensagem || "...";
                     div.innerHTML = `${texto}<div class="text-[10px] text-slate-400 text-right mt-1">${time}</div>`;
                 } else if (msg.status === 'pendente') {
+                    // PEDIDO (AMARELO)
                     div.className = "bubble bubble-order";
                     let itemsTxt = msg.itens?.itens?.map(i => `${i.qtd} ${i.item}`).join('<br>') || "Pedido Criado";
                     div.innerHTML = `
@@ -321,6 +303,18 @@
                 container.appendChild(div);
             });
             container.scrollTop = container.scrollHeight;
+        }
+
+        // Formata data: HOJE, ONTEM, TERÇA-FEIRA...
+        function formatDateLabel(dateStr) {
+            const d = new Date(dateStr);
+            const today = new Date();
+            const yesterday = new Date();
+            yesterday.setDate(today.getDate() - 1);
+
+            if (d.toLocaleDateString() === today.toLocaleDateString()) return "HOJE";
+            if (d.toLocaleDateString() === yesterday.toLocaleDateString()) return "ONTEM";
+            return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' }).toUpperCase();
         }
 
         function switchView(view) {
