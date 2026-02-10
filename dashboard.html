@@ -38,7 +38,8 @@
             const container = document.getElementById('lista-pedidos');
             
             // Busca os dados no Supabase
-            const { data, error } = await supabase
+            // Usamos 'client' aqui também
+                const { data, error } = await client
                 .from('pedidos_whatsapp')
                 .select('*')
                 .order('created_at', { ascending: false });
@@ -99,3 +100,4 @@
 </body>
 
 </html>
+
