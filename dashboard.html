@@ -23,18 +23,17 @@
                 <img src="logo.jpeg" onerror="this.src='https://placehold.co/50x50/orange/white?text=PG'" class="h-10 w-10 rounded-full border border-yellow-500">
                 <div>
                     <h1 class="text-lg font-bold text-yellow-500">Pizzaria do Gordo</h1>
-                    <div id="status-rede" class="text-xs text-green-500 flex items-center gap-1">● Sistema Online</div>
+                    <div id="status-rede" class="text-xs text-green-500 flex items-center gap-1">● Online</div>
                 </div>
             </div>
-            <div class="text-xs text-gray-400">
-                Fila: <span class="font-bold text-white text-lg" id="contador-ativos">0</span>
-            </div>
+            <div class="text-xs text-gray-400">Fila: <span class="font-bold text-white text-lg" id="contador-ativos">0</span></div>
         </div>
     </header>
 
-    <div class="container mx-auto px-2 mt-4 flex gap-2">
-        <button onclick="mudarAba('ativos')" id="tab-ativos" class="flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm">🔥 Cozinha</button>
-        <button onclick="mudarAba('historico')" id="tab-historico" class="flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm">📂 Histórico</button>
+    <div class="container mx-auto px-2 mt-4 flex gap-1 overflow-x-auto">
+        <button onclick="mudarAba('ativos')" id="tab-ativos" class="flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm min-w-[120px]">🔥 Cozinha</button>
+        <button onclick="mudarAba('historico')" id="tab-historico" class="flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm min-w-[120px]">🏁 Entregues</button>
+        <button onclick="mudarAba('logs')" id="tab-logs" class="flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm min-w-[120px]">📂 Logs/Clientes</button>
     </div>
 
     <div class="container mx-auto px-2 py-4">
@@ -57,35 +56,35 @@
 
         function iniciarRealtime() {
             carregarBanco();
-            // Escuta mudanças no banco e recarrega tela automaticamente
             client.channel('tabela-pedidos')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, () => {
-                    console.log("Mudança no banco detectada!");
-                    carregarBanco();
-                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, () => carregarBanco())
                 .subscribe();
         }
 
         async function carregarBanco() {
             let query = client.from('pedidos_whatsapp').select('*').order('created_at', { ascending: false });
+            
+            // Lógica de Filtro do Banco para não pesar
             if (abaAtual === 'ativos') {
                 const ontem = new Date();
                 ontem.setHours(ontem.getHours() - 24);
                 query = query.gt('created_at', ontem.toISOString());
+            } else if (abaAtual === 'logs') {
+                query = query.limit(100); // Traz os últimos 100 logs gerais
             } else {
-                query = query.limit(40);
+                query = query.limit(50); // Histórico de entregas
             }
+            
             const { data } = await query;
             if (data) { dadosLocais = data; renderizar(); }
         }
 
-        // LIMPEZA DE ENDEREÇO
         function formatarEndereco(endRaw) {
             if (!endRaw || endRaw === "Não informado") return "Balcão / A combinar";
             try {
                 if (endRaw.trim().startsWith('{')) {
                     const obj = JSON.parse(endRaw);
-                    return `${obj.rua || ''}, ${obj.numero || ''} - ${obj.bairro || ''}`.replace(/^, /, '');
+                    return `${obj.rua || ''}, ${obj.numero || ''} - ${obj.bairro || ''} ${obj.referencia ? '('+obj.referencia+')' : ''}`.replace(/^, /, '');
                 }
             } catch (e) {}
             return endRaw.replace(/{|}|"/g, '').replace(/,/g, ', ');
@@ -97,117 +96,122 @@
             
             const filtrados = dadosLocais.filter(item => {
                 if (abaAtual === 'ativos') return item.status === 'pendente' || item.status === 'em_entrega';
-                return true;
+                if (abaAtual === 'historico') return item.status === 'concluido';
+                return true; // Logs mostra tudo (conversa, pendente, concluido)
             });
-            document.getElementById('contador-ativos').innerText = filtrados.length;
+
+            if (abaAtual === 'ativos') {
+                document.getElementById('contador-ativos').innerText = filtrados.length;
+            }
 
             if (filtrados.length === 0) {
-                container.innerHTML = '<div class="col-span-full text-center text-gray-600 py-10">Cozinha vazia!</div>';
+                container.innerHTML = '<div class="col-span-full text-center text-gray-600 py-10">Lista vazia.</div>';
                 return;
             }
 
             filtrados.forEach(p => {
                 const dataCriacao = new Date(p.created_at);
                 const hora = dataCriacao.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-                const agora = new Date();
-
-                // Timer
-                let timerHtml = '';
-                let borderClass = 'border-gray-700';
-
-                if (p.status === 'pendente') {
-                    const diff = Math.floor((agora - dataCriacao) / 60000);
-                    let cor = diff > 40 ? 'text-red-500 font-bold' : (diff > 20 ? 'text-yellow-400' : 'text-green-400');
-                    if (diff > 40) borderClass = 'border-red-500 piscando';
-                    timerHtml = `<span class="${cor} text-xs font-bold flex items-center gap-1"><span class="material-icons text-[12px]">oven_gen</span> ${diff} min</span>`;
-                } else if (p.status === 'em_entrega') {
-                    const diff = p.saiu_entrega_em ? Math.floor((agora - new Date(p.saiu_entrega_em)) / 60000) : 0;
-                    timerHtml = `<span class="text-blue-300 text-xs font-bold flex items-center gap-1"><span class="material-icons text-[12px]">two_wheeler</span> Rua: ${diff} min</span>`;
-                    borderClass = 'border-blue-600';
-                }
-
+                const dia = dataCriacao.toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
+                
+                // --- CONTEÚDO DO PEDIDO (Mostra detalhes: cebola, refri, etc) ---
                 let conteudo = '';
-                if (p.itens?.itens) {
-                    p.itens.itens.forEach(i => conteudo += `<div class="flex justify-between text-sm border-b border-gray-700 py-1"><span class="font-bold text-yellow-100">${i.qtd}x</span> <span class="text-gray-300 ml-2 truncate">${i.item}</span></div>`);
-                } else {
-                    conteudo = '<span class="text-gray-500 italic text-sm">Verificando pedido...</span>';
+                if (p.status === 'conversa') {
+                    // Se for log de conversa, mostra o texto da mensagem
+                    const textoMsg = p.itens?.mensagem || "Mensagem de texto";
+                    conteudo = `<div class="text-gray-400 italic text-sm p-2 bg-gray-900/30 rounded border-l-2 border-blue-500">"${textoMsg}"</div>`;
+                } else if (p.itens?.itens) {
+                    p.itens.itens.forEach(i => {
+                        conteudo += `<div class="flex justify-between items-start text-sm border-b border-gray-700 py-2 last:border-0">
+                            <span class="font-bold text-yellow-100 whitespace-nowrap mr-2">${i.qtd}x</span> 
+                            <span class="text-gray-300 leading-tight">${i.item}</span>
+                        </div>`;
+                    });
                 }
 
-                const enderecoL = formatarEndereco(p.endereco);
-
-                // Botão OTIMISTA (Atualização Visual Imediata)
-                let btn = '';
-                if (p.status === 'pendente') {
-                    // ID do botão inclui o ID do pedido para manipularmos depois
-                    btn = `<button id="btn-${p.id}" onclick="acaoOtimista('${p.id}', 'em_entrega')" class="w-full mt-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">two_wheeler</span> SAIU P/ ENTREGA</button>`;
-                } else if (p.status === 'em_entrega') {
-                    btn = `<button id="btn-${p.id}" onclick="acaoOtimista('${p.id}', 'concluido')" class="w-full mt-3 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">check</span> ENTREGUE</button>`;
-                }
-
+                // Cards diferentes dependendo da aba
                 const card = document.createElement('div');
-                card.id = `card-${p.id}`; // ID do Card para sumir com ele
-                card.className = `bg-gray-800 rounded-lg p-3 shadow border ${borderClass} card-anim relative`;
-                card.innerHTML = `
-                    <div class="flex justify-between items-start mb-2">
-                        <h3 class="font-bold text-white truncate max-w-[70%]">${p.cliente_nome}</h3>
-                        ${timerHtml}
-                    </div>
-                    <div class="bg-gray-900/50 p-2 rounded mb-2 min-h-[40px]">${conteudo}</div>
-                    <div class="text-xs text-gray-400 flex items-center gap-1 mb-1"><span class="material-icons text-[10px]">schedule</span> ${hora}</div>
-                    <div class="text-xs text-gray-300 flex items-start gap-1 mt-1 bg-gray-700/30 p-1 rounded">
-                        <span class="material-icons text-[12px] mt-[2px] text-yellow-500">place</span> 
-                        <span class="break-words leading-tight max-w-[90%]">${enderecoL}</span>
-                    </div>
-                    ${btn}
-                `;
+                card.className = `bg-gray-800 rounded-lg p-3 shadow border border-gray-700 card-anim relative`;
+                
+                // Se for aba de Logs, visual é mais compacto
+                if (abaAtual === 'logs') {
+                    const statusColor = p.status === 'conversa' ? 'text-gray-500' : (p.status === 'pendente' ? 'text-yellow-500' : 'text-green-500');
+                    card.innerHTML = `
+                        <div class="flex justify-between mb-1">
+                            <span class="text-xs text-gray-500">${dia} ${hora}</span>
+                            <span class="text-xs font-bold uppercase ${statusColor}">${p.status}</span>
+                        </div>
+                        <div class="font-bold text-white mb-1">${p.cliente_nome} <span class="text-xs text-gray-500 font-normal">(${p.whatsapp_numero.replace('@c.us','').slice(-4)})</span></div>
+                        ${conteudo}
+                    `;
+                } else {
+                    // Aba Cozinha e Histórico (Visual Completo)
+                    let btn = '';
+                    if (p.status === 'pendente') {
+                        btn = `<button onclick="acaoOtimista('${p.id}', 'em_entrega')" class="w-full mt-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">two_wheeler</span> SAIU</button>`;
+                    } else if (p.status === 'em_entrega') {
+                        btn = `<button onclick="acaoOtimista('${p.id}', 'concluido')" class="w-full mt-3 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">check</span> ENTREGUE</button>`;
+                    }
+
+                    const enderecoL = formatarEndereco(p.endereco);
+
+                    card.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-bold text-white truncate max-w-[70%]">${p.cliente_nome}</h3>
+                            <span class="text-xs bg-gray-700 px-2 py-1 rounded text-gray-300">${hora}</span>
+                        </div>
+                        <div class="bg-gray-900/50 p-2 rounded mb-2 min-h-[40px]">${conteudo}</div>
+                        
+                        ${p.status !== 'conversa' ? `
+                        <div class="text-xs text-gray-300 flex items-start gap-1 mt-1 bg-gray-700/30 p-1 rounded">
+                            <span class="material-icons text-[12px] mt-[2px] text-yellow-500">place</span> 
+                            <span class="break-words leading-tight max-w-[90%]">${enderecoL}</span>
+                        </div>` : ''}
+                        
+                        ${btn}
+                    `;
+                }
                 container.appendChild(card);
             });
         }
 
-        // FUNÇÃO OTIMISTA: Muda a tela ANTES do banco responder
         async function acaoOtimista(id, novoStatus) {
-            const card = document.getElementById(`card-${id}`);
-            const btn = document.getElementById(`btn-${id}`);
-            
-            // Feedback Visual Imediato
-            if (btn) {
-                btn.innerHTML = '<span class="material-icons animate-spin">refresh</span> Processando...';
-                btn.disabled = true;
-                btn.className = "w-full mt-3 bg-gray-600 text-gray-300 font-bold py-2 rounded text-sm flex justify-center items-center gap-2 cursor-wait";
-            }
-            if (card) card.style.opacity = '0.7';
-
-            // Envia para o banco
             let dados = { status: novoStatus };
             if (novoStatus === 'em_entrega') dados.saiu_entrega_em = new Date().toISOString();
             if (novoStatus === 'concluido') dados.concluido_em = new Date().toISOString();
-            
             await client.from('pedidos_whatsapp').update(dados).eq('id', id);
-            
-            // O Realtime vai rodar carregarBanco() em seguida e arrumar tudo
         }
 
         function mudarAba(nova) {
             abaAtual = nova;
-            document.getElementById('tab-ativos').className = nova === 'ativos' ? "flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm" : "flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm";
-            document.getElementById('tab-historico').className = nova === 'historico' ? "flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm" : "flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm";
+            // Estilização simples dos botões
+            ['ativos', 'historico', 'logs'].forEach(aba => {
+                const btn = document.getElementById(`tab-${aba}`);
+                if (aba === nova) btn.className = "flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm min-w-[120px]";
+                else btn.className = "flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm min-w-[120px]";
+            });
             carregarBanco();
         }
 
         async function baixarExcelBrasileiro() {
             const { data } = await client.from('pedidos_whatsapp').select('*').order('created_at', {ascending: false});
-            let csv = "Data;Dia;Cliente;Pedido;Status;Pagamento;Endereco\n";
+            let csv = "Data;Dia;Cliente;Telefone;Pedido;Status;Endereco\n";
             data.forEach(d => {
-                let itens = d.itens?.itens?.map(i=>`${i.qtd} ${i.item}`).join(" + ") || "";
+                let itens = "";
+                if (d.itens?.itens) itens = d.itens.itens.map(i=>`${i.qtd} ${i.item}`).join(" + ");
+                else if (d.itens?.mensagem) itens = `[Msg]: ${d.itens.mensagem}`;
+                
                 itens = itens.replace(/;/g, " ").replace(/\n/g, " ");
                 let endereco = formatarEndereco(d.endereco).replace(/;/g, ","); 
                 let cliente = (d.cliente_nome || "Cliente").replace(/;/g, " ");
-                csv += `${new Date(d.created_at).toLocaleDateString('pt-BR')};${new Date(d.created_at).toLocaleDateString('pt-BR',{weekday:'long'})};${cliente};${itens};${d.status};${d.metodo_pagamento || ""};${endereco}\n`;
+                let tel = d.whatsapp_numero.replace('@c.us','');
+
+                csv += `${new Date(d.created_at).toLocaleDateString('pt-BR')};${new Date(d.created_at).toLocaleDateString('pt-BR',{weekday:'long'})};${cliente};${tel};${itens};${d.status};${endereco}\n`;
             });
             const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
-            link.download = `Relatorio_${new Date().toLocaleDateString('pt-BR').replace(/\//g,'-')}.csv`;
+            link.download = `Relatorio_Completo_${new Date().toISOString().split('T')[0]}.csv`;
             document.body.appendChild(link);
             link.click();
         }
