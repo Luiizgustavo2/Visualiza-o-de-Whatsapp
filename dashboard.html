@@ -10,8 +10,7 @@
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
-        .card-anim { transition: all 0.3s ease; animation: slideIn 0.3s ease-out; }
-        @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .card-anim { transition: all 0.3s ease; }
         .piscando { animation: piscar 1.5s infinite; }
         @keyframes piscar { 0% { border-color: red; } 50% { border-color: transparent; } 100% { border-color: red; } }
     </style>
@@ -24,27 +23,27 @@
                 <img src="logo.jpeg" onerror="this.src='https://placehold.co/50x50/orange/white?text=PG'" class="h-10 w-10 rounded-full border border-yellow-500">
                 <div>
                     <h1 class="text-lg font-bold text-yellow-500">Pizzaria do Gordo</h1>
-                    <div id="status-rede" class="text-xs text-green-500 flex items-center gap-1">● Conectado</div>
+                    <div id="status-rede" class="text-xs text-green-500 flex items-center gap-1">● Sistema Online</div>
                 </div>
             </div>
             <div class="text-xs text-gray-400">
-                Ativos: <span class="font-bold text-white text-lg" id="contador-ativos">0</span>
+                Fila: <span class="font-bold text-white text-lg" id="contador-ativos">0</span>
             </div>
         </div>
     </header>
 
     <div class="container mx-auto px-2 mt-4 flex gap-2">
-        <button onclick="mudarAba('ativos')" id="tab-ativos" class="flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm">🔥 Cozinha & Entrega</button>
+        <button onclick="mudarAba('ativos')" id="tab-ativos" class="flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm">🔥 Cozinha</button>
         <button onclick="mudarAba('historico')" id="tab-historico" class="flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm">📂 Histórico</button>
     </div>
 
     <div class="container mx-auto px-2 py-4">
         <div id="lista-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            <p class="col-span-full text-center text-gray-500 py-10">Aguardando pedidos...</p>
+            <p class="col-span-full text-center text-gray-500">Carregando...</p>
         </div>
     </div>
 
-    <button onclick="baixarExcelBrasileiro()" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white p-3 rounded-full shadow-lg z-50 transition transform hover:scale-110" title="Baixar Planilha">
+    <button onclick="baixarExcelBrasileiro()" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white p-3 rounded-full shadow-lg z-50">
         <span class="material-icons">download</span>
     </button>
 
@@ -57,10 +56,14 @@
         let dadosLocais = []; 
 
         function iniciarRealtime() {
+            carregarBanco();
+            // Escuta mudanças no banco e recarrega tela automaticamente
             client.channel('tabela-pedidos')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, () => carregarBanco())
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, () => {
+                    console.log("Mudança no banco detectada!");
+                    carregarBanco();
+                })
                 .subscribe();
-            carregarBanco(); 
         }
 
         async function carregarBanco() {
@@ -76,32 +79,22 @@
             if (data) { dadosLocais = data; renderizar(); }
         }
 
-        // --- FUNÇÃO DE LIMPEZA DO ENDEREÇO ---
+        // LIMPEZA DE ENDEREÇO
         function formatarEndereco(endRaw) {
-            if (!endRaw || endRaw === "Não informado") return "Retirada / Balcão";
-            
+            if (!endRaw || endRaw === "Não informado") return "Balcão / A combinar";
             try {
-                // Tenta ler se for formato JSON (aquele cheio de chaves)
-                // Se a string começar com '{', provavelmente é JSON
                 if (endRaw.trim().startsWith('{')) {
                     const obj = JSON.parse(endRaw);
-                    // Monta bonito: Rua tal, numero tal - Bairro tal
-                    let texto = `${obj.rua || ''}, ${obj.numero || 'S/N'}`;
-                    if (obj.bairro) texto += ` - ${obj.bairro}`;
-                    if (obj.referencia) texto += ` (${obj.referencia})`;
-                    return texto.replace(/^, /, ''); // Remove vírgula do começo se não tiver rua
+                    return `${obj.rua || ''}, ${obj.numero || ''} - ${obj.bairro || ''}`.replace(/^, /, '');
                 }
-            } catch (e) {
-                // Se der erro ao ler JSON, ignora e segue pro tratamento de texto comum
-            }
-
-            // Se for texto normal, só limpa aspas e chaves feias se tiverem sobrado
+            } catch (e) {}
             return endRaw.replace(/{|}|"/g, '').replace(/,/g, ', ');
         }
 
         function renderizar() {
             const container = document.getElementById('lista-cards');
             container.innerHTML = '';
+            
             const filtrados = dadosLocais.filter(item => {
                 if (abaAtual === 'ativos') return item.status === 'pendente' || item.status === 'em_entrega';
                 return true;
@@ -109,7 +102,7 @@
             document.getElementById('contador-ativos').innerText = filtrados.length;
 
             if (filtrados.length === 0) {
-                container.innerHTML = '<div class="col-span-full text-center text-gray-600 py-10">Tudo limpo!</div>';
+                container.innerHTML = '<div class="col-span-full text-center text-gray-600 py-10">Cozinha vazia!</div>';
                 return;
             }
 
@@ -133,50 +126,65 @@
                     borderClass = 'border-blue-600';
                 }
 
-                // Conteudo do Pedido
                 let conteudo = '';
-                if (p.status === 'conversa') conteudo = '<span class="text-gray-500 italic text-sm">💬 Mensagem</span>';
-                else if (p.itens?.itens) {
+                if (p.itens?.itens) {
                     p.itens.itens.forEach(i => conteudo += `<div class="flex justify-between text-sm border-b border-gray-700 py-1"><span class="font-bold text-yellow-100">${i.qtd}x</span> <span class="text-gray-300 ml-2 truncate">${i.item}</span></div>`);
+                } else {
+                    conteudo = '<span class="text-gray-500 italic text-sm">Verificando pedido...</span>';
                 }
 
-                // Endereço Limpo
-                const enderecoBonito = formatarEndereco(p.endereco);
+                const enderecoL = formatarEndereco(p.endereco);
 
-                // Botão
+                // Botão OTIMISTA (Atualização Visual Imediata)
                 let btn = '';
                 if (p.status === 'pendente') {
-                    btn = `<button onclick="alterarStatus('${p.id}', 'em_entrega')" class="w-full mt-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">two_wheeler</span> SAIU</button>`;
+                    // ID do botão inclui o ID do pedido para manipularmos depois
+                    btn = `<button id="btn-${p.id}" onclick="acaoOtimista('${p.id}', 'em_entrega')" class="w-full mt-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">two_wheeler</span> SAIU P/ ENTREGA</button>`;
                 } else if (p.status === 'em_entrega') {
-                    btn = `<button onclick="alterarStatus('${p.id}', 'concluido')" class="w-full mt-3 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">check</span> ENTREGUE</button>`;
+                    btn = `<button id="btn-${p.id}" onclick="acaoOtimista('${p.id}', 'concluido')" class="w-full mt-3 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">check</span> ENTREGUE</button>`;
                 }
 
                 const card = document.createElement('div');
+                card.id = `card-${p.id}`; // ID do Card para sumir com ele
                 card.className = `bg-gray-800 rounded-lg p-3 shadow border ${borderClass} card-anim relative`;
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <h3 class="font-bold text-white truncate max-w-[70%]">${p.cliente_nome}</h3>
                         ${timerHtml}
                     </div>
-                    <div class="bg-gray-900/50 p-2 rounded mb-2">${conteudo}</div>
+                    <div class="bg-gray-900/50 p-2 rounded mb-2 min-h-[40px]">${conteudo}</div>
                     <div class="text-xs text-gray-400 flex items-center gap-1 mb-1"><span class="material-icons text-[10px]">schedule</span> ${hora}</div>
-                    
-                    <div class="text-xs text-gray-300 flex items-start gap-1 mt-2 bg-gray-700/30 p-1 rounded">
+                    <div class="text-xs text-gray-300 flex items-start gap-1 mt-1 bg-gray-700/30 p-1 rounded">
                         <span class="material-icons text-[12px] mt-[2px] text-yellow-500">place</span> 
-                        <span class="break-words leading-tight">${enderecoBonito}</span>
+                        <span class="break-words leading-tight max-w-[90%]">${enderecoL}</span>
                     </div>
-
                     ${btn}
                 `;
                 container.appendChild(card);
             });
         }
 
-        async function alterarStatus(id, novoStatus) {
+        // FUNÇÃO OTIMISTA: Muda a tela ANTES do banco responder
+        async function acaoOtimista(id, novoStatus) {
+            const card = document.getElementById(`card-${id}`);
+            const btn = document.getElementById(`btn-${id}`);
+            
+            // Feedback Visual Imediato
+            if (btn) {
+                btn.innerHTML = '<span class="material-icons animate-spin">refresh</span> Processando...';
+                btn.disabled = true;
+                btn.className = "w-full mt-3 bg-gray-600 text-gray-300 font-bold py-2 rounded text-sm flex justify-center items-center gap-2 cursor-wait";
+            }
+            if (card) card.style.opacity = '0.7';
+
+            // Envia para o banco
             let dados = { status: novoStatus };
             if (novoStatus === 'em_entrega') dados.saiu_entrega_em = new Date().toISOString();
             if (novoStatus === 'concluido') dados.concluido_em = new Date().toISOString();
+            
             await client.from('pedidos_whatsapp').update(dados).eq('id', id);
+            
+            // O Realtime vai rodar carregarBanco() em seguida e arrumar tudo
         }
 
         function mudarAba(nova) {
@@ -189,25 +197,17 @@
         async function baixarExcelBrasileiro() {
             const { data } = await client.from('pedidos_whatsapp').select('*').order('created_at', {ascending: false});
             let csv = "Data;Dia;Cliente;Pedido;Status;Pagamento;Endereco\n";
-            
             data.forEach(d => {
                 let itens = d.itens?.itens?.map(i=>`${i.qtd} ${i.item}`).join(" + ") || "";
                 itens = itens.replace(/;/g, " ").replace(/\n/g, " ");
-
-                // Usa a mesma função para limpar o endereço no Excel
                 let endereco = formatarEndereco(d.endereco).replace(/;/g, ","); 
                 let cliente = (d.cliente_nome || "Cliente").replace(/;/g, " ");
-
-                const dataFormatada = new Date(d.created_at).toLocaleDateString('pt-BR');
-                const diaSemana = new Date(d.created_at).toLocaleDateString('pt-BR',{weekday:'long'});
-
-                csv += `${dataFormatada};${diaSemana};${cliente};${itens};${d.status};${d.metodo_pagamento || ""};${endereco}\n`;
+                csv += `${new Date(d.created_at).toLocaleDateString('pt-BR')};${new Date(d.created_at).toLocaleDateString('pt-BR',{weekday:'long'})};${cliente};${itens};${d.status};${d.metodo_pagamento || ""};${endereco}\n`;
             });
-
             const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
-            link.download = `Relatorio_Pizzaria_${new Date().toISOString().split('T')[0]}.csv`;
+            link.download = `Relatorio_${new Date().toLocaleDateString('pt-BR').replace(/\//g,'-')}.csv`;
             document.body.appendChild(link);
             link.click();
         }
