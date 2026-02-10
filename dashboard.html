@@ -48,7 +48,7 @@
         </div>
     </div>
 
-    <button onclick="baixarExcelCompleto()" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white p-3 rounded-full shadow-lg z-50">
+    <button onclick="baixarExcelBrasileiro()" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white p-3 rounded-full shadow-lg z-50" title="Baixar Planilha">
         <span class="material-icons">download</span>
     </button>
 
@@ -58,27 +58,21 @@
         const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         let abaAtual = 'ativos';
-        let dadosLocais = []; // Guarda os dados na memória do navegador
+        let dadosLocais = []; 
 
-        // --- SISTEMA REALTIME (A Mágica sem F5) ---
         function iniciarRealtime() {
-            // Inscreve para ouvir QUALQUER mudança na tabela
             client
                 .channel('tabela-pedidos')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, payload => {
-                    console.log('Mudança detectada!', payload);
-                    carregarBanco(); // Recarrega os dados quando houver mudança
+                    carregarBanco(); 
                 })
                 .subscribe();
-            
-            carregarBanco(); // Carrega a primeira vez
+            carregarBanco(); 
         }
 
         async function carregarBanco() {
-            // Busca apenas o necessário para não pesar no PC fraco
             let query = client.from('pedidos_whatsapp').select('*').order('created_at', { ascending: false });
 
-            // Se for aba ativos, limita a 24h atrás. Se for histórico, limita a 40 itens.
             if (abaAtual === 'ativos') {
                 const ontem = new Date();
                 ontem.setHours(ontem.getHours() - 24);
@@ -115,7 +109,7 @@
                 const hora = dataCriacao.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
                 const agora = new Date();
 
-                // Cronômetro
+                // Cronômetro e Cores
                 let statusInfo = '';
                 let borderClass = 'border-gray-700';
 
@@ -130,14 +124,12 @@
                     borderClass = 'border-blue-600';
                 }
 
-                // Conteúdo
                 let conteudo = '';
                 if (p.status === 'conversa') conteudo = '<span class="text-gray-500 italic text-sm">💬 Mensagem</span>';
                 else if (p.itens?.itens) {
                     p.itens.itens.forEach(i => conteudo += `<div class="flex justify-between text-sm border-b border-gray-700 py-1"><span class="font-bold text-yellow-100">${i.qtd}x</span> <span class="text-gray-300 ml-2 truncate">${i.item}</span></div>`);
                 }
 
-                // Botão
                 let btn = '';
                 if (p.status === 'pendente') {
                     btn = `<button onclick="alterarStatus('${p.id}', 'em_entrega')" class="w-full mt-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">two_wheeler</span> SAIU</button>`;
@@ -145,7 +137,6 @@
                     btn = `<button onclick="alterarStatus('${p.id}', 'concluido')" class="w-full mt-3 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">check</span> ENTREGUE</button>`;
                 }
 
-                // Card HTML
                 const card = document.createElement('div');
                 card.className = `bg-gray-800 rounded-lg p-3 shadow border ${borderClass} card-anim relative`;
                 card.innerHTML = `
@@ -163,7 +154,6 @@
         }
 
         async function alterarStatus(id, novoStatus) {
-            // Atualiza direto no banco. O Realtime vai perceber e atualizar a tela sozinho!
             let dados = { status: novoStatus };
             if (novoStatus === 'em_entrega') dados.saiu_entrega_em = new Date().toISOString();
             if (novoStatus === 'concluido') dados.concluido_em = new Date().toISOString();
@@ -172,29 +162,42 @@
 
         function mudarAba(nova) {
             abaAtual = nova;
-            // Atualiza visual dos botões
             document.getElementById('tab-ativos').className = nova === 'ativos' ? "flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm" : "flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm";
             document.getElementById('tab-historico').className = nova === 'historico' ? "flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm" : "flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm";
             carregarBanco();
         }
 
-        async function baixarExcelCompleto() {
-            // Mesma função de antes para baixar Excel
-            const { data } = await client.from('pedidos_whatsapp').select('*');
-            let csv = "Data,Dia,Cliente,Pedido,Status\n";
+        // --- EXCEL BRASILEIRO CORRIGIDO ---
+        async function baixarExcelBrasileiro() {
+            const { data } = await client.from('pedidos_whatsapp').select('*').order('created_at', {ascending: false});
+            
+            // Cabeçalho com Ponto e Vírgula (Padrão BR)
+            let csv = "Data;Dia;Cliente;Pedido;Status;Pagamento;Endereco\n";
+            
             data.forEach(d => {
-                let itens = d.itens?.itens?.map(i=>`${i.qtd} ${i.item}`).join(" ") || "";
-                csv += `${new Date(d.created_at).toLocaleDateString()},${new Date(d.created_at).toLocaleDateString('pt-BR',{weekday:'long'})},${d.cliente_nome},${itens.replace(/,/g,' ')},${d.status}\n`;
+                let itens = d.itens?.itens?.map(i=>`${i.qtd} ${i.item}`).join(" + ") || "";
+                itens = itens.replace(/;/g, " "); // Remove ponto e vírgula do texto pra não quebrar
+                itens = itens.replace(/(\r\n|\n|\r)/gm, " "); // Remove quebras de linha
+
+                const dataFormatada = new Date(d.created_at).toLocaleDateString('pt-BR');
+                const diaSemana = new Date(d.created_at).toLocaleDateString('pt-BR',{weekday:'long'});
+                const enderecoLimpo = (d.endereco || "").replace(/;/g, ",");
+
+                // Monta a linha com ;
+                csv += `${dataFormatada};${diaSemana};${d.cliente_nome};${itens};${d.status};${d.metodo_pagamento || ""};${enderecoLimpo}\n`;
             });
+
+            // Adiciona o BOM (\uFEFF) para o Excel entender Acentos (ã, é, ç)
+            const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
-            link.href = "data:text/csv;charset=utf-8," + encodeURI(csv);
-            link.download = "Relatorio.csv";
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", `Relatorio_Pizzaria_${new Date().toLocaleDateString('pt-BR').replace(/\//g,'-')}.csv`);
+            document.body.appendChild(link);
             link.click();
         }
 
-        // Inicia o sistema
         iniciarRealtime();
-        // Atualiza os relógios a cada minuto (sem baixar dados, só recálculo visual)
         setInterval(renderizar, 60000);
     </script>
 </body>
