@@ -9,27 +9,28 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f1f5f9; overflow: hidden; } /* Overflow hidden para o layout de chat */
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f1f5f9; overflow: hidden; }
         
-        /* Estilos do Dashboard (Cards) */
+        /* Dashboard */
         .card { transition: all 0.2s; }
         .card:hover { transform: translateY(-3px); }
-        .new-item-flash { animation: flash 1s; }
-        @keyframes flash { 0% { background-color: #374151; } 100% { background-color: #1f2937; } }
-
-        /* Estilos do Modo Chat (WhatsApp Style) */
+        
+        /* Chat Layout */
         .chat-layout { height: calc(100vh - 80px); display: flex; }
         .chat-sidebar { width: 350px; background-color: #1e293b; border-right: 1px solid #334155; overflow-y: auto; }
         .chat-main { flex: 1; background-color: #0b1120; background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 20px 20px; display: flex; flex-direction: column; }
         .contact-item:hover, .contact-item.active { background-color: #334155; cursor: pointer; }
         
-        /* Bolhas de Chat */
+        /* Bolhas */
         .bubble { max-width: 70%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.4; position: relative; margin-bottom: 8px; }
         .bubble-user { background-color: #374151; color: #fff; align-self: flex-start; border-top-left-radius: 0; }
-        .bubble-system { align-self: center; background-color: #1e293b; color: #94a3b8; font-size: 12px; border: 1px solid #334155; max-width: 90%; text-align: center; }
         .bubble-order { background-color: #422006; color: #fde047; align-self: flex-end; border-top-right-radius: 0; border: 1px solid #ca8a04; }
+        
+        /* Separador de Data */
+        .date-divider { display: flex; justify-content: center; margin: 15px 0; }
+        .date-badge { background-color: #1e293b; color: #94a3b8; font-size: 11px; padding: 4px 12px; border-radius: 99px; border: 1px solid #334155; text-transform: uppercase; font-weight: bold; }
 
-        /* Scrollbar */
+        /* Ocultar scrollbar mas permitir rolagem */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
@@ -66,37 +67,32 @@
             <button onclick="filterDash('active')" id="filter-active" class="px-4 py-2 bg-yellow-600/20 text-yellow-500 border border-yellow-600/50 rounded-lg text-sm font-bold">Em Aberto</button>
             <button onclick="filterDash('history')" id="filter-history" class="px-4 py-2 text-slate-400 hover:bg-slate-800 rounded-lg text-sm">Histórico Finalizado</button>
         </div>
-        
         <div id="grid-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
-            <div class="col-span-full text-center py-20 opacity-50">Carregando pedidos...</div>
+            <div class="col-span-full text-center py-20 opacity-50">Sincronizando...</div>
         </div>
     </div>
 
     <div id="view-chat" class="chat-layout hidden">
         <div class="chat-sidebar flex flex-col">
             <div class="p-3 bg-slate-800 border-b border-slate-700">
-                <input type="text" placeholder="Buscar cliente..." class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-white focus:outline-none focus:border-yellow-500">
+                <input type="text" id="search-contact" placeholder="Buscar cliente..." onkeyup="renderChatList()" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-white focus:outline-none focus:border-yellow-500">
             </div>
-            <div id="contact-list" class="flex-1 overflow-y-auto">
-                </div>
+            <div id="contact-list" class="flex-1 overflow-y-auto"></div>
         </div>
-        
         <div class="chat-main">
             <div id="chat-header" class="h-14 bg-slate-800 border-b border-slate-700 flex items-center px-4 justify-between hidden">
                 <div class="flex items-center gap-3">
                     <div class="h-9 w-9 rounded-full bg-slate-600 flex items-center justify-center text-white font-bold" id="chat-avatar">?</div>
                     <div>
-                        <h3 class="font-bold text-sm text-white" id="chat-name">Nome do Cliente</h3>
-                        <p class="text-xs text-slate-400" id="chat-phone">+55 00 0000-0000</p>
+                        <h3 class="font-bold text-sm text-white" id="chat-name">Cliente</h3>
+                        <p class="text-xs text-slate-400" id="chat-phone">...</p>
                     </div>
                 </div>
-                <button class="text-slate-400 hover:text-white"><span class="material-icons">more_vert</span></button>
             </div>
-
             <div id="chat-messages" class="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
                 <div class="flex h-full items-center justify-center text-slate-500 flex-col opacity-50">
                     <span class="material-icons text-6xl mb-4">forum</span>
-                    <p>Selecione uma conversa para ver o histórico</p>
+                    <p>Selecione uma conversa</p>
                 </div>
             </div>
         </div>
@@ -107,28 +103,43 @@
     </button>
 
     <script>
+        // CONFIGURAÇÃO
         const SUPABASE_URL = 'https://zocvshviimdzaourupau.supabase.co';
         const SUPABASE_KEY = 'sb_publishable_AQ1RRrRoOptDXQRu4gxnjA_kj6lN57t';
         const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         let dbData = [];
-        let currentView = 'dashboard'; // 'dashboard' ou 'chat'
-        let currentDashFilter = 'active'; // 'active' ou 'history'
+        let currentView = 'dashboard';
+        let currentDashFilter = 'active';
         let selectedChatPhone = null;
 
         function init() {
             refreshData();
+            
+            // 1. REALTIME (Tenta ser rápido)
             client.channel('any').on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, () => {
+                console.log("⚡ Mudança detectada (Realtime)");
                 refreshData();
             }).subscribe();
+
+            // 2. BACKUP AUTOMÁTICO (Adeus F5 - Roda a cada 4 segundos)
+            setInterval(() => {
+                console.log("🔄 Auto-atualização (Backup)");
+                refreshData();
+            }, 4000);
         }
 
         async function refreshData() {
-            // Traz até 500 registros para ter histórico suficiente
-            const { data } = await client.from('pedidos_whatsapp').select('*').order('created_at', { ascending: false }).limit(500);
-            if (data) {
-                dbData = data;
-                updateUI();
+            const { data, error } = await client.from('pedidos_whatsapp')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(500);
+            
+            if (!error && data) {
+                if (JSON.stringify(data) !== JSON.stringify(dbData)) {
+                    dbData = data;
+                    updateUI();
+                }
             }
         }
 
@@ -145,19 +156,19 @@
             document.getElementById('count-street').innerText = street;
         }
 
-        // --- LÓGICA DO DASHBOARD (COZINHA) ---
+        // --- DASHBOARD (COZINHA) ---
         function renderDashboard() {
             const grid = document.getElementById('grid-cards');
             grid.innerHTML = '';
             
             const filtered = dbData.filter(item => {
-                if (item.status === 'log_conversa') return false; // Esconde chat puro
+                if (item.status === 'log_conversa') return false; 
                 if (currentDashFilter === 'active') return item.status === 'pendente' || item.status === 'em_entrega';
                 return item.status === 'concluido';
             });
 
             if (filtered.length === 0) {
-                grid.innerHTML = `<div class="col-span-full text-center py-10 opacity-40">Nenhum pedido aqui.</div>`;
+                grid.innerHTML = `<div class="col-span-full text-center py-10 opacity-40">Nenhum pedido nesta fase.</div>`;
                 return;
             }
 
@@ -173,7 +184,6 @@
                     item.itens.itens.forEach(i => itemsHtml += `<div class="flex justify-between text-sm py-1 border-b border-slate-700/50"><span class="text-yellow-500 font-bold">${i.qtd}x</span> <span class="text-slate-200">${i.item}</span></div>`);
                 }
 
-                // Botão de Ação
                 let btn = '';
                 if(item.status === 'pendente') btn = `<button onclick="setStatus('${item.id}', 'em_entrega')" class="mt-3 w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded text-sm transition">SAIU P/ ENTREGA</button>`;
                 else if(item.status === 'em_entrega') btn = `<button onclick="setStatus('${item.id}', 'concluido')" class="mt-3 w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded text-sm transition">FINALIZAR</button>`;
@@ -194,28 +204,29 @@
             });
         }
 
-        // --- LÓGICA DO CHAT (WHATSAPP CRM) ---
+        // --- CHAT CRM ---
         function renderChatList() {
             const list = document.getElementById('contact-list');
+            const term = document.getElementById('search-contact').value.toLowerCase();
             list.innerHTML = '';
 
-            // Agrupa mensagens por número
             const chats = {};
             dbData.forEach(d => {
                 if(!chats[d.whatsapp_numero]) {
                     chats[d.whatsapp_numero] = {
                         name: d.cliente_nome,
                         phone: d.whatsapp_numero,
-                        lastMsg: d.created_at,
-                        preview: d.status === 'log_conversa' ? d.itens?.mensagem : '📝 Pedido atualizado',
+                        lastMsgDate: d.created_at,
+                        preview: d.status === 'log_conversa' ? (d.itens?.mensagem || 'Mensagem') : '📝 Pedido realizado',
                         raw: []
                     };
                 }
                 chats[d.whatsapp_numero].raw.push(d);
             });
 
-            // Ordena por data
-            const sortedChats = Object.values(chats).sort((a,b) => new Date(b.lastMsg) - new Date(a.lastMsg));
+            const sortedChats = Object.values(chats)
+                .filter(c => c.name.toLowerCase().includes(term) || c.phone.includes(term))
+                .sort((a,b) => new Date(b.lastMsgDate) - new Date(a.lastMsgDate));
 
             sortedChats.forEach(c => {
                 const el = document.createElement('div');
@@ -223,7 +234,7 @@
                 el.className = `contact-item p-3 border-b border-slate-700/50 flex gap-3 items-center transition ${isActive}`;
                 el.onclick = () => openChat(c.phone, c.name, c.raw);
                 
-                const time = new Date(c.lastMsg).toLocaleTimeString().slice(0,5);
+                const time = new Date(c.lastMsgDate).toLocaleTimeString().slice(0,5);
                 const letter = c.name ? c.name[0].toUpperCase() : '#';
 
                 el.innerHTML = `
@@ -233,13 +244,12 @@
                             <h4 class="text-sm font-bold text-white truncate">${c.name}</h4>
                             <span class="text-[10px] text-slate-500">${time}</span>
                         </div>
-                        <p class="text-xs text-slate-400 truncate">${c.preview || '...'}</p>
+                        <p class="text-xs text-slate-400 truncate">${c.preview}</p>
                     </div>
                 `;
                 list.appendChild(el);
             });
 
-            // Se tiver chat aberto, re-renderiza as mensagens (para pegar novas em tempo real)
             if (selectedChatPhone && chats[selectedChatPhone]) {
                 renderMessages(chats[selectedChatPhone].raw);
             }
@@ -251,38 +261,59 @@
             document.getElementById('chat-avatar').innerText = name ? name[0] : '#';
             document.getElementById('chat-name').innerText = name;
             document.getElementById('chat-phone').innerText = phone.replace('@c.us', '');
-            
-            renderChatList(); // Para atualizar o item ativo na lista
+            renderChatList(); 
             renderMessages(messages);
         }
 
+        // --- FUNÇÃO AUXILIAR PARA FORMATAR DATA (HOJE, ONTEM, ETC) ---
+        function formatDateLabel(dateStr) {
+            const d = new Date(dateStr);
+            const today = new Date();
+            const yesterday = new Date();
+            yesterday.setDate(today.getDate() - 1);
+
+            if (d.toLocaleDateString() === today.toLocaleDateString()) return "HOJE";
+            if (d.toLocaleDateString() === yesterday.toLocaleDateString()) return "ONTEM";
+            return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' }).toUpperCase();
+        }
+
+        // --- RENDERIZA MENSAGENS COM DIVISOR DE DATA ---
         function renderMessages(messages) {
             const container = document.getElementById('chat-messages');
             container.innerHTML = '';
             
-            // Ordena cronologicamente (Antigas em cima)
+            // Ordena: Mais antigo em cima
             const sorted = messages.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
 
+            let lastDate = null;
+
             sorted.forEach(msg => {
+                if (msg.status === 'concluido' || msg.status === 'em_entrega') return;
+
+                // LÓGICA DO DIVISOR DE DATA
+                const msgDateObj = new Date(msg.created_at);
+                const msgDateStr = msgDateObj.toLocaleDateString();
+
+                if (msgDateStr !== lastDate) {
+                    const separator = document.createElement('div');
+                    separator.className = 'date-divider';
+                    separator.innerHTML = `<span class="date-badge">${formatDateLabel(msg.created_at)}</span>`;
+                    container.appendChild(separator);
+                    lastDate = msgDateStr;
+                }
+
                 const div = document.createElement('div');
-                const time = new Date(msg.created_at).toLocaleTimeString().slice(0,5);
+                const time = msgDateObj.toLocaleTimeString().slice(0,5);
                 
                 if (msg.status === 'log_conversa') {
-                    // Mensagem do Usuário
                     div.className = "bubble bubble-user";
-                    div.innerHTML = `
-                        ${msg.itens?.mensagem || '...'}
-                        <div class="text-[10px] text-slate-400 text-right mt-1">${time}</div>
-                    `;
-                } else {
-                    // Pedido do Sistema
-                    const isSystem = true;
+                    let texto = msg.itens?.mensagem || "...";
+                    div.innerHTML = `${texto}<div class="text-[10px] text-slate-400 text-right mt-1">${time}</div>`;
+                } else if (msg.status === 'pendente') {
                     div.className = "bubble bubble-order";
                     let itemsTxt = msg.itens?.itens?.map(i => `${i.qtd} ${i.item}`).join('<br>') || "Pedido Criado";
-                    
-                    // Se for atualização (mesmo ID mas data diferente), marca diferente
                     div.innerHTML = `
-                        <div class="font-bold text-xs mb-1 uppercase tracking-wider text-yellow-600">📝 Pedido ${msg.status}</div>
+                        <div class="font-bold text-xs mb-1 uppercase tracking-wider text-yellow-600">📝 Pedido Aberto</div>
                         <div>${itemsTxt}</div>
                         <div class="text-[10px] text-yellow-800 text-right mt-1">${time}</div>
                     `;
@@ -292,14 +323,12 @@
             container.scrollTop = container.scrollHeight;
         }
 
-        // --- UTILITÁRIOS ---
         function switchView(view) {
             currentView = view;
             document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
             document.getElementById('view-chat').classList.toggle('hidden', view !== 'chat');
             document.getElementById('btn-export').classList.toggle('hidden', view !== 'dashboard');
             
-            // Estilo dos botões
             const btnDash = document.getElementById('btn-dash');
             const btnChat = document.getElementById('btn-chat');
             
@@ -322,7 +351,6 @@
 
         function goToChat(phone) {
             switchView('chat');
-            // Pequeno delay para a lista renderizar e podermos abrir
             setTimeout(() => {
                 const userData = dbData.find(d => d.whatsapp_numero === phone);
                 if(userData) {
@@ -337,6 +365,7 @@
             if(status === 'em_entrega') updates.saiu_entrega_em = new Date();
             if(status === 'concluido') updates.concluido_em = new Date();
             await client.from('pedidos_whatsapp').update(updates).eq('id', id);
+            refreshData(); 
         }
 
         function cleanAddress(raw) {
@@ -351,8 +380,19 @@
         }
         
         function exportExcel() {
-            // ... (mesma função de exportar de antes)
-            alert("Exportando...");
+            let csv = "Data;Cliente;Pedido;Status\n";
+            dbData.forEach(d => {
+                if(d.status === 'log_conversa') return;
+                let itens = d.itens?.itens?.map(i=>`${i.qtd} ${i.item}`).join(" + ") || "";
+                csv += `${new Date(d.created_at).toLocaleDateString()};${d.cliente_nome};${itens};${d.status}\n`;
+            });
+            const blob = new Blob(["\uFEFF"+csv], {type: 'text/csv;charset=utf-8;'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "Relatorio.csv";
+            document.body.appendChild(a);
+            a.click();
         }
 
         init();
