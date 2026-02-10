@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus ERP - Pedidos em Tempo Real</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">🍕 Nexus ERP</h1>
+                <p class="text-gray-500">Monitor de Pedidos via WhatsApp</p>
+            </div>
+            <button onclick="carregarPedidos()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                Atualizar Lista
+            </button>
+        </header>
+
+        <div id="lista-pedidos" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <p class="text-gray-500">Carregando pedidos...</p>
+        </div>
+    </div>
+
+    <script>
+        // CONFIGURAÇÃO DO SUPABASE (Front-end seguro usa apenas a ANON KEY)
+        // Substitua pelos seus dados REAIS aqui para testar
+        const SUPABASE_URL ='https://zocvshviimdzaourupau.supabase.co';
+        const SUPABASE_KEY ='sb_publishable_AQ1RRrRoOptDXQRu4gxnjA_kj6lN57t';
+
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        async function carregarPedidos() {
+            const container = document.getElementById('lista-pedidos');
+            
+            // Busca os dados no Supabase
+            const { data, error } = await supabase
+                .from('pedidos_whatsapp')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (error) {
+                console.error('Erro:', error);
+                container.innerHTML = '<p class="text-red-500">Erro ao carregar pedidos.</p>';
+                return;
+            }
+
+            // Limpa a tela
+            container.innerHTML = '';
+
+            // Cria os Cards
+            data.forEach(pedido => {
+                const card = document.createElement('div');
+                card.className = 'bg-white p-6 rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition';
+                
+                // Formata a data
+                const dataPedido = new Date(pedido.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
+
+                // Monta lista de itens
+                let listaItens = '';
+                if (pedido.itens && Array.isArray(pedido.itens.itens)) {
+                    pedido.itens.itens.forEach(i => {
+                        listaItens += `<li class="text-gray-700 font-medium">• ${i.qtd}x ${i.item}</li>`;
+                    });
+                } else {
+                    listaItens = '<li class="text-gray-400">Ver detalhes no sistema</li>';
+                }
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-4">
+                        <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">${pedido.status || 'Novo'}</span>
+                        <span class="text-gray-400 text-sm">🕒 ${dataPedido}</span>
+                    </div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-1">${pedido.cliente_nome}</h3>
+                    <p class="text-sm text-gray-500 mb-4">${pedido.whatsapp_numero}</p>
+                    
+                    <div class="bg-gray-50 p-3 rounded-lg mb-4">
+                        <ul class="space-y-1 text-sm">
+                            ${listaItens}
+                        </ul>
+                    </div>
+
+                    <div class="border-t pt-3 text-sm text-gray-600">
+                        <p>📍 <strong>Entrega:</strong> ${pedido.endereco || 'Não informado'}</p>
+                        <p>💰 <strong>Pagamento:</strong> ${pedido.metodo_pagamento || 'A combinar'}</p>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        // Carrega ao abrir a página
+        carregarPedidos();
+    </script>
+</body>
+</html>
