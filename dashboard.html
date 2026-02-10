@@ -24,7 +24,7 @@
                 <img src="logo.jpeg" onerror="this.src='https://placehold.co/50x50/orange/white?text=PG'" class="h-10 w-10 rounded-full border border-yellow-500">
                 <div>
                     <h1 class="text-lg font-bold text-yellow-500">Pizzaria do Gordo</h1>
-                    <div id="status-rede" class="text-xs text-green-500 flex items-center gap-1">● Conectado (Realtime)</div>
+                    <div id="status-rede" class="text-xs text-green-500 flex items-center gap-1">● Conectado</div>
                 </div>
             </div>
             <div class="text-xs text-gray-400">
@@ -34,12 +34,8 @@
     </header>
 
     <div class="container mx-auto px-2 mt-4 flex gap-2">
-        <button onclick="mudarAba('ativos')" id="tab-ativos" class="flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm">
-            🔥 Cozinha & Entrega
-        </button>
-        <button onclick="mudarAba('historico')" id="tab-historico" class="flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm">
-            📂 Histórico
-        </button>
+        <button onclick="mudarAba('ativos')" id="tab-ativos" class="flex-1 bg-gray-800 border-b-2 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t text-sm">🔥 Cozinha & Entrega</button>
+        <button onclick="mudarAba('historico')" id="tab-historico" class="flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t text-sm">📂 Histórico</button>
     </div>
 
     <div class="container mx-auto px-2 py-4">
@@ -48,7 +44,7 @@
         </div>
     </div>
 
-    <button onclick="baixarExcelBrasileiro()" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white p-3 rounded-full shadow-lg z-50" title="Baixar Planilha">
+    <button onclick="baixarExcelBrasileiro()" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white p-3 rounded-full shadow-lg z-50 transition transform hover:scale-110" title="Baixar Planilha">
         <span class="material-icons">download</span>
     </button>
 
@@ -61,18 +57,14 @@
         let dadosLocais = []; 
 
         function iniciarRealtime() {
-            client
-                .channel('tabela-pedidos')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, payload => {
-                    carregarBanco(); 
-                })
+            client.channel('tabela-pedidos')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, () => carregarBanco())
                 .subscribe();
             carregarBanco(); 
         }
 
         async function carregarBanco() {
             let query = client.from('pedidos_whatsapp').select('*').order('created_at', { ascending: false });
-
             if (abaAtual === 'ativos') {
                 const ontem = new Date();
                 ontem.setHours(ontem.getHours() - 24);
@@ -80,23 +72,40 @@
             } else {
                 query = query.limit(40);
             }
+            const { data } = await query;
+            if (data) { dadosLocais = data; renderizar(); }
+        }
 
-            const { data, error } = await query;
-            if (!error) {
-                dadosLocais = data;
-                renderizar();
+        // --- FUNÇÃO DE LIMPEZA DO ENDEREÇO ---
+        function formatarEndereco(endRaw) {
+            if (!endRaw || endRaw === "Não informado") return "Retirada / Balcão";
+            
+            try {
+                // Tenta ler se for formato JSON (aquele cheio de chaves)
+                // Se a string começar com '{', provavelmente é JSON
+                if (endRaw.trim().startsWith('{')) {
+                    const obj = JSON.parse(endRaw);
+                    // Monta bonito: Rua tal, numero tal - Bairro tal
+                    let texto = `${obj.rua || ''}, ${obj.numero || 'S/N'}`;
+                    if (obj.bairro) texto += ` - ${obj.bairro}`;
+                    if (obj.referencia) texto += ` (${obj.referencia})`;
+                    return texto.replace(/^, /, ''); // Remove vírgula do começo se não tiver rua
+                }
+            } catch (e) {
+                // Se der erro ao ler JSON, ignora e segue pro tratamento de texto comum
             }
+
+            // Se for texto normal, só limpa aspas e chaves feias se tiverem sobrado
+            return endRaw.replace(/{|}|"/g, '').replace(/,/g, ', ');
         }
 
         function renderizar() {
             const container = document.getElementById('lista-cards');
             container.innerHTML = '';
-
             const filtrados = dadosLocais.filter(item => {
                 if (abaAtual === 'ativos') return item.status === 'pendente' || item.status === 'em_entrega';
                 return true;
             });
-
             document.getElementById('contador-ativos').innerText = filtrados.length;
 
             if (filtrados.length === 0) {
@@ -109,27 +118,32 @@
                 const hora = dataCriacao.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
                 const agora = new Date();
 
-                // Cronômetro e Cores
-                let statusInfo = '';
+                // Timer
+                let timerHtml = '';
                 let borderClass = 'border-gray-700';
 
                 if (p.status === 'pendente') {
                     const diff = Math.floor((agora - dataCriacao) / 60000);
                     let cor = diff > 40 ? 'text-red-500 font-bold' : (diff > 20 ? 'text-yellow-400' : 'text-green-400');
                     if (diff > 40) borderClass = 'border-red-500 piscando';
-                    statusInfo = `<span class="${cor} text-xs font-bold flex items-center gap-1"><span class="material-icons text-[12px]">oven_gen</span> ${diff} min</span>`;
+                    timerHtml = `<span class="${cor} text-xs font-bold flex items-center gap-1"><span class="material-icons text-[12px]">oven_gen</span> ${diff} min</span>`;
                 } else if (p.status === 'em_entrega') {
                     const diff = p.saiu_entrega_em ? Math.floor((agora - new Date(p.saiu_entrega_em)) / 60000) : 0;
-                    statusInfo = `<span class="text-blue-300 text-xs font-bold flex items-center gap-1"><span class="material-icons text-[12px]">two_wheeler</span> Rua: ${diff} min</span>`;
+                    timerHtml = `<span class="text-blue-300 text-xs font-bold flex items-center gap-1"><span class="material-icons text-[12px]">two_wheeler</span> Rua: ${diff} min</span>`;
                     borderClass = 'border-blue-600';
                 }
 
+                // Conteudo do Pedido
                 let conteudo = '';
                 if (p.status === 'conversa') conteudo = '<span class="text-gray-500 italic text-sm">💬 Mensagem</span>';
                 else if (p.itens?.itens) {
                     p.itens.itens.forEach(i => conteudo += `<div class="flex justify-between text-sm border-b border-gray-700 py-1"><span class="font-bold text-yellow-100">${i.qtd}x</span> <span class="text-gray-300 ml-2 truncate">${i.item}</span></div>`);
                 }
 
+                // Endereço Limpo
+                const enderecoBonito = formatarEndereco(p.endereco);
+
+                // Botão
                 let btn = '';
                 if (p.status === 'pendente') {
                     btn = `<button onclick="alterarStatus('${p.id}', 'em_entrega')" class="w-full mt-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded text-sm flex justify-center items-center gap-2 transition"><span class="material-icons text-sm">two_wheeler</span> SAIU</button>`;
@@ -142,11 +156,16 @@
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <h3 class="font-bold text-white truncate max-w-[70%]">${p.cliente_nome}</h3>
-                        ${statusInfo}
+                        ${timerHtml}
                     </div>
                     <div class="bg-gray-900/50 p-2 rounded mb-2">${conteudo}</div>
                     <div class="text-xs text-gray-400 flex items-center gap-1 mb-1"><span class="material-icons text-[10px]">schedule</span> ${hora}</div>
-                    <div class="text-xs text-gray-400 flex items-center gap-1 truncate"><span class="material-icons text-[10px]">place</span> ${p.endereco || 'Retirada'}</div>
+                    
+                    <div class="text-xs text-gray-300 flex items-start gap-1 mt-2 bg-gray-700/30 p-1 rounded">
+                        <span class="material-icons text-[12px] mt-[2px] text-yellow-500">place</span> 
+                        <span class="break-words leading-tight">${enderecoBonito}</span>
+                    </div>
+
                     ${btn}
                 `;
                 container.appendChild(card);
@@ -167,32 +186,28 @@
             carregarBanco();
         }
 
-        // --- EXCEL BRASILEIRO CORRIGIDO ---
         async function baixarExcelBrasileiro() {
             const { data } = await client.from('pedidos_whatsapp').select('*').order('created_at', {ascending: false});
-            
-            // Cabeçalho com Ponto e Vírgula (Padrão BR)
             let csv = "Data;Dia;Cliente;Pedido;Status;Pagamento;Endereco\n";
             
             data.forEach(d => {
                 let itens = d.itens?.itens?.map(i=>`${i.qtd} ${i.item}`).join(" + ") || "";
-                itens = itens.replace(/;/g, " "); // Remove ponto e vírgula do texto pra não quebrar
-                itens = itens.replace(/(\r\n|\n|\r)/gm, " "); // Remove quebras de linha
+                itens = itens.replace(/;/g, " ").replace(/\n/g, " ");
+
+                // Usa a mesma função para limpar o endereço no Excel
+                let endereco = formatarEndereco(d.endereco).replace(/;/g, ","); 
+                let cliente = (d.cliente_nome || "Cliente").replace(/;/g, " ");
 
                 const dataFormatada = new Date(d.created_at).toLocaleDateString('pt-BR');
                 const diaSemana = new Date(d.created_at).toLocaleDateString('pt-BR',{weekday:'long'});
-                const enderecoLimpo = (d.endereco || "").replace(/;/g, ",");
 
-                // Monta a linha com ;
-                csv += `${dataFormatada};${diaSemana};${d.cliente_nome};${itens};${d.status};${d.metodo_pagamento || ""};${enderecoLimpo}\n`;
+                csv += `${dataFormatada};${diaSemana};${cliente};${itens};${d.status};${d.metodo_pagamento || ""};${endereco}\n`;
             });
 
-            // Adiciona o BOM (\uFEFF) para o Excel entender Acentos (ã, é, ç)
             const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
-            const url = URL.createObjectURL(blob);
-            link.setAttribute("href", url);
-            link.setAttribute("download", `Relatorio_Pizzaria_${new Date().toLocaleDateString('pt-BR').replace(/\//g,'-')}.csv`);
+            link.href = URL.createObjectURL(blob);
+            link.download = `Relatorio_Pizzaria_${new Date().toISOString().split('T')[0]}.csv`;
             document.body.appendChild(link);
             link.click();
         }
