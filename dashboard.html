@@ -3,101 +3,293 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nexus ERP - Pedidos em Tempo Real</title>
+    <title>Gestão - Pizzaria do Gordo</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .piscando { animation: piscar 1.5s infinite; }
+        @keyframes piscar { 0% { opacity: 1; border-color: red; } 50% { opacity: 0.4; border-color: transparent; } 100% { opacity: 1; border-color: red; } }
+        .card-anim { transition: all 0.3s ease; }
+        /* Animação de carregamento no botão */
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="bg-gray-900 text-gray-100 min-h-screen pb-20">
 
-    <div class="container mx-auto px-4 py-8">
-        <header class="mb-8 flex justify-between items-center">
-            <div>
-                <h1 class="text-3xl font-bold text-gray-800">🍕 Nexus ERP</h1>
-                <p class="text-gray-500">Monitor de Pedidos via WhatsApp</p>
+    <audio id="som-alerta" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+
+    <header class="bg-gray-800 border-b border-gray-700 p-4 sticky top-0 z-50 shadow-lg">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <img src="logo.jpeg" onerror="this.src='https://placehold.co/50x50/orange/white?text=PG'" class="h-12 w-12 rounded-full border-2 border-yellow-500 shadow-lg">
+                <div>
+                    <h1 class="text-xl font-bold text-yellow-500 tracking-tight">Pizzaria do Gordo</h1>
+                    <div id="status-rede" class="text-xs text-gray-500 flex items-center gap-1">Verificando...</div>
+                </div>
             </div>
-            <button onclick="carregarPedidos()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
-                Atualizar Lista
-            </button>
-        </header>
+            <div class="flex flex-col items-end gap-2">
+                <button onclick="ativarSom()" id="btn-som" class="text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-gray-300 border border-gray-600 transition">🔇 Som</button>
+                <div class="text-xs text-gray-400">Pedidos ativos: <span class="font-bold text-white text-lg" id="contador-ativos">0</span></div>
+            </div>
+        </div>
+    </header>
 
-        <div id="lista-pedidos" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <p class="text-gray-500">Carregando pedidos...</p>
+    <div class="container mx-auto px-2 mt-6 mb-4 flex gap-2">
+        <button onclick="mudarAba('ativos')" id="tab-ativos" class="flex-1 bg-gray-800 border-b-4 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t-lg shadow-lg">
+            🔥 Cozinha & Entrega
+        </button>
+        <button onclick="mudarAba('historico')" id="tab-historico" class="flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t-lg hover:bg-gray-800 hover:text-white transition">
+            📂 Histórico / Conversas
+        </button>
+    </div>
+
+    <div class="container mx-auto px-2">
+        <div id="lista-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <p class="col-span-full text-center text-gray-500 py-10 animate-pulse">Carregando pedidos...</p>
         </div>
     </div>
 
-    <script>
-        // CONFIGURAÇÃO DO SUPABASE (Front-end seguro usa apenas a ANON KEY)
-        // Substitua pelos seus dados REAIS aqui para testar
-        const SUPABASE_URL ='https://zocvshviimdzaourupau.supabase.co';
-        const SUPABASE_KEY ='sb_publishable_AQ1RRrRoOptDXQRu4gxnjA_kj6lN57t';
+    <button onclick="baixarExcelCompleto()" id="btn-exportar" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white p-4 rounded-full shadow-2xl flex items-center justify-center transition transform hover:scale-110 z-50" title="Baixar Relatório Completo">
+        <span class="material-icons">download</span>
+    </button>
 
-        // Mudamos o nome para 'client' para não confundir
+    <script>
+        // --- CONFIGURAÇÃO ---
+        const SUPABASE_URL = 'https://zocvshviimdzaourupau.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_AQ1RRrRoOptDXQRu4gxnjA_kj6lN57t'; 
         const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        async function carregarPedidos() {
-            const container = document.getElementById('lista-pedidos');
-            
-            // Busca os dados no Supabase
-            // Usamos 'client' aqui também
-                const { data, error } = await client
-                .from('pedidos_whatsapp')
-                .select('*')
-                .order('created_at', { ascending: false });
+        let abaAtual = 'ativos';
+        let idsConhecidos = new Set();
+        let somHabilitado = false;
 
-            if (error) {
-                console.error('Erro:', error);
-                container.innerHTML = '<p class="text-red-500">Erro ao carregar pedidos.</p>';
+        async function carregar() {
+            try {
+                // LÓGICA DE PERFORMANCE:
+                // Se for aba 'ativos', pega só as últimas 24h para ser rápido.
+                // Se for 'histórico', pega os últimos 50.
+                let query = client.from('pedidos_whatsapp').select('*').order('created_at', { ascending: false });
+
+                if (abaAtual === 'ativos') {
+                    const ontem = new Date();
+                    ontem.setHours(ontem.getHours() - 24);
+                    query = query.gt('created_at', ontem.toISOString());
+                } else {
+                    query = query.limit(50);
+                }
+
+                const { data, error } = await query;
+                if (error) throw error;
+
+                document.getElementById('status-rede').innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full"></span> Online';
+                renderizar(data);
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById('status-rede').innerHTML = '<span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span> Offline';
+            }
+        }
+
+        function renderizar(dados) {
+            const container = document.getElementById('lista-cards');
+            container.innerHTML = '';
+
+            const filtrados = dados.filter(item => {
+                if (abaAtual === 'ativos') {
+                    // Mostra pendentes (cozinha) e em_entrega (rua)
+                    return item.status === 'pendente' || item.status === 'em_entrega';
+                }
+                return true; 
+            });
+
+            // Som de alerta
+            if (abaAtual === 'ativos') {
+                let temNovo = false;
+                filtrados.forEach(p => {
+                    if (!idsConhecidos.has(p.id) && p.status === 'pendente') {
+                        temNovo = true;
+                        idsConhecidos.add(p.id);
+                    }
+                });
+                if (temNovo && somHabilitado) document.getElementById('som-alerta').play().catch(()=>{});
+            }
+
+            document.getElementById('contador-ativos').innerText = filtrados.length;
+
+            if (filtrados.length === 0) {
+                container.innerHTML = '<div class="col-span-full text-center text-gray-600 py-10 flex flex-col items-center"><span class="material-icons text-5xl mb-2">check_circle_outline</span><p>Tudo limpo por aqui!</p></div>';
                 return;
             }
 
-            // Limpa a tela
-            container.innerHTML = '';
+            filtrados.forEach(p => {
+                const dataCriacao = new Date(p.created_at);
+                const hora = dataCriacao.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+                const dia = dataCriacao.toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
 
-            // Cria os Cards
-            data.forEach(pedido => {
-                const card = document.createElement('div');
-                card.className = 'bg-white p-6 rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition';
-                
-                // Formata a data
-                const dataPedido = new Date(pedido.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
+                // --- CRONÔMETRO ---
+                let cronometroHTML = '';
+                let statusCor = '';
+                let bordaAnimada = '';
+                const agora = new Date();
 
-                // Monta lista de itens
-                let listaItens = '';
-                if (pedido.itens && Array.isArray(pedido.itens.itens)) {
-                    pedido.itens.itens.forEach(i => {
-                        listaItens += `<li class="text-gray-700 font-medium">• ${i.qtd}x ${i.item}</li>`;
-                    });
-                } else {
-                    listaItens = '<li class="text-gray-400">Ver detalhes no sistema</li>';
+                if (p.status === 'pendente') {
+                    const diffMin = Math.floor((agora - dataCriacao) / 60000);
+                    if (diffMin > 40) { bordaAnimada = "border-red-500 piscando"; statusCor = "text-red-500"; }
+                    else if (diffMin > 20) { statusCor = "text-yellow-400"; }
+                    else { statusCor = "text-green-400"; }
+
+                    cronometroHTML = `<div class="flex items-center gap-1 ${statusCor} bg-gray-900 px-2 py-1 rounded text-xs font-bold">
+                        <span class="material-icons text-[14px]">oven_gen</span> Coz: ${diffMin} min
+                    </div>`;
+
+                } else if (p.status === 'em_entrega') {
+                    const saiuEm = new Date(p.saiu_entrega_em);
+                    const diffRua = Math.floor((agora - saiuEm) / 60000);
+                    cronometroHTML = `<div class="flex items-center gap-1 text-blue-300 bg-blue-900/40 px-2 py-1 rounded text-xs font-bold border border-blue-800">
+                        <span class="material-icons text-[14px]">two_wheeler</span> Rua: ${diffRua} min
+                    </div>`;
+                    bordaAnimada = "border-blue-600";
                 }
 
-                card.innerHTML = `
-                    <div class="flex justify-between items-start mb-4">
-                        <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">${pedido.status || 'Novo'}</span>
-                        <span class="text-gray-400 text-sm">🕒 ${dataPedido}</span>
-                    </div>
-                    <h3 class="text-xl font-bold text-gray-900 mb-1">${pedido.cliente_nome}</h3>
-                    <p class="text-sm text-gray-500 mb-4">${pedido.whatsapp_numero}</p>
-                    
-                    <div class="bg-gray-50 p-3 rounded-lg mb-4">
-                        <ul class="space-y-1 text-sm">
-                            ${listaItens}
-                        </ul>
-                    </div>
+                // --- BOTÕES ---
+                let botaoAcao = '';
+                if (p.status === 'pendente') {
+                    botaoAcao = `<button onclick="avancarStatus('${p.id}', 'em_entrega')" class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 rounded shadow flex items-center justify-center gap-2 transition">
+                        <span class="material-icons">two_wheeler</span> SAIU P/ ENTREGA
+                    </button>`;
+                } else if (p.status === 'em_entrega') {
+                    botaoAcao = `<button onclick="avancarStatus('${p.id}', 'concluido')" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded shadow flex items-center justify-center gap-2 transition">
+                        <span class="material-icons">check_circle</span> ENTREGUE
+                    </button>`;
+                }
 
-                    <div class="border-t pt-3 text-sm text-gray-600">
-                        <p>📍 <strong>Entrega:</strong> ${pedido.endereco || 'Não informado'}</p>
-                        <p>💰 <strong>Pagamento:</strong> ${pedido.metodo_pagamento || 'A combinar'}</p>
+                // --- CONTEÚDO ---
+                let conteudo = '';
+                if (p.status === 'conversa') {
+                    conteudo = '<p class="italic text-gray-500 text-sm">💬 Mensagem de texto</p>';
+                } else if (p.itens?.itens) {
+                    p.itens.itens.forEach(i => {
+                        conteudo += `<div class="flex justify-between py-1 border-b border-gray-700 last:border-0"><span class="font-bold text-yellow-100">${i.qtd}x</span> <span class="text-gray-300 ml-2 flex-1">${i.item}</span></div>`;
+                    });
+                }
+
+                // CARD
+                const card = document.createElement('div');
+                card.className = `bg-gray-800 rounded-xl p-4 shadow-lg border-2 ${bordaAnimada || 'border-gray-700'} relative card-anim`;
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-3">
+                        <h3 class="font-bold text-white text-lg truncate pr-2">${p.cliente_nome}</h3>
+                        ${cronometroHTML}
                     </div>
+                    <div class="text-xs text-gray-400 mb-2 flex items-center gap-1">
+                        <span class="bg-gray-700 px-1 rounded text-white">${dia}</span>
+                        <span>às ${hora}</span>
+                    </div>
+                    <div class="bg-gray-900/50 p-3 rounded mb-3 space-y-1">
+                        ${conteudo}
+                    </div>
+                    <div class="text-xs text-gray-400 mb-4 flex items-center gap-1 truncate">
+                        <span class="material-icons text-[14px]">place</span> ${p.endereco || 'Retirada'}
+                    </div>
+                    ${botaoAcao}
                 `;
                 container.appendChild(card);
             });
         }
 
-        // Carrega ao abrir a página
-        carregarPedidos();
+        async function avancarStatus(id, novoStatus) {
+            let updateData = { status: novoStatus };
+            if (novoStatus === 'em_entrega') updateData.saiu_entrega_em = new Date().toISOString();
+            if (novoStatus === 'concluido') updateData.concluido_em = new Date().toISOString();
+
+            // Feedback visual imediato
+            carregar(); 
+            await client.from('pedidos_whatsapp').update(updateData).eq('id', id);
+            carregar();
+        }
+
+        // --- RELATÓRIO PODEROSO (Aqui está a sua análise de Segunda a Segunda) ---
+        async function baixarExcelCompleto() {
+            const btn = document.getElementById('btn-exportar');
+            const iconeOriginal = btn.innerHTML;
+            btn.innerHTML = '<span class="material-icons spin">refresh</span>'; // Ícone girando
+
+            try {
+                // 1. Busca TUDO do banco (sem limites)
+                const { data, error } = await client
+                    .from('pedidos_whatsapp')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) throw error;
+
+                // 2. Monta o CSV com a coluna DIA DA SEMANA
+                let csv = "Data,Dia da Semana,Hora Pedido,Hora Saiu Entrega,Hora Finalizado,Tempo Cozinha(min),Tempo Entrega(min),Cliente,Telefone,Itens,Endereco\n";
+
+                data.forEach(d => {
+                    const dtCriacao = new Date(d.created_at);
+                    
+                    // Coluna nova: DIA DA SEMANA (segunda-feira, terça-feira...)
+                    const diaSemana = dtCriacao.toLocaleDateString('pt-BR', { weekday: 'long' });
+                    const dataFormatada = dtCriacao.toLocaleDateString('pt-BR');
+                    const horaPedido = dtCriacao.toLocaleTimeString('pt-BR');
+
+                    const horaSaiu = d.saiu_entrega_em ? new Date(d.saiu_entrega_em).toLocaleTimeString() : '-';
+                    const horaFim = d.concluido_em ? new Date(d.concluido_em).toLocaleTimeString() : '-';
+
+                    // Cálculos de tempo para o relatório
+                    let tempoCozinha = '-', tempoEntrega = '-';
+                    if (d.saiu_entrega_em) {
+                        tempoCozinha = Math.floor((new Date(d.saiu_entrega_em) - dtCriacao) / 60000);
+                    }
+                    if (d.saiu_entrega_em && d.concluido_em) {
+                        tempoEntrega = Math.floor((new Date(d.concluido_em) - new Date(d.saiu_entrega_em)) / 60000);
+                    }
+
+                    // Formata itens
+                    let resumoItens = d.itens?.itens?.map(i => `${i.qtd}x ${i.item}`).join(" + ") || "msg";
+                    resumoItens = resumoItens.replace(/,/g, " "); // Tira vírgulas para não quebrar CSV
+
+                    csv += `${dataFormatada},${diaSemana},${horaPedido},${horaSaiu},${horaFim},${tempoCozinha},${tempoEntrega},${d.cliente_nome},${d.whatsapp_numero.replace('@c.us','')},${resumoItens},"${d.endereco||''}"\n`;
+                });
+
+                // 3. Download
+                const link = document.createElement("a");
+                link.href = "data:text/csv;charset=utf-8," + encodeURI(csv);
+                link.download = `Relatorio_Pizzaria_Completo_${new Date().toISOString().split('T')[0]}.csv`;
+                link.click();
+
+            } catch (erro) {
+                alert("Erro ao baixar relatório: " + erro.message);
+            } finally {
+                btn.innerHTML = iconeOriginal;
+            }
+        }
+
+        function mudarAba(aba) {
+            abaAtual = aba;
+            idsConhecidos.clear();
+            const btnAtivo = "flex-1 bg-gray-800 border-b-4 border-yellow-500 text-yellow-500 font-bold py-3 rounded-t-lg shadow-lg";
+            const btnInativo = "flex-1 bg-gray-800/40 text-gray-400 font-medium py-3 rounded-t-lg hover:bg-gray-800 hover:text-white transition";
+            
+            document.getElementById('tab-ativos').className = aba === 'ativos' ? btnAtivo : btnInativo;
+            document.getElementById('tab-historico').className = aba === 'historico' ? btnAtivo : btnInativo;
+            carregar();
+        }
+
+        function ativarSom() {
+            somHabilitado = true;
+            document.getElementById('btn-som').className = "text-xs bg-green-900 text-green-400 px-3 py-1 rounded border border-green-600 font-bold";
+            document.getElementById('btn-som').innerText = "🔊 Ativado";
+            document.getElementById('som-alerta').play().catch(()=>{});
+        }
+
+        setInterval(carregar, 10000);
+        carregar();
     </script>
 </body>
-
 </html>
-
