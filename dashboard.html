@@ -426,35 +426,53 @@
             return raw.replace(/{|}|"/g, '').replace(/,/g, ', ');
         }
         
+       // --- RELATÓRIO EXCEL INSPIRADO NO SISTEMA ANTIGO ---
         function exportExcel() {
-            let csv = "Data;Dia da Semana;Cliente;Telefone;Pedido;Status;Tempo Cozinha (min);Tempo Rua (min);Tempo Total (min);Endereco\n";
+            // Cabeçalho baseado na estrutura do Sale_export.csv
+            let csv = "Data;Hora;Nome do Cliente;Telefone;Endereco;Itens do Pedido;Metodo de Pagamento;Status;Tempo Cozinha (min);Tempo Rua (min);Tempo Total (min)\n";
+            
             dbData.forEach(d => {
-                if(d.status === 'log_conversa') return;
+                if(d.status === 'log_conversa') return; // Ignora as conversas, exporta só pedidos
                 
-                let itens = d.itens?.itens?.map(i=>`${i.qtd} ${i.item}`).join(" + ") || "";
-                itens = itens.replace(/;/g, " ").replace(/\n/g, " ");
+                // Formatação dos Itens (Semelhante ao que você tinha)
+                let itens = "";
+                if (d.itens?.itens) {
+                    itens = d.itens.itens.map(i => `${i.qtd}x ${i.item}`).join(" | ");
+                }
+                itens = itens.replace(/;/g, ",").replace(/\n/g, " "); // Proteção para não quebrar colunas
+                
+                // Tratamento de Texto
                 let endereco = cleanAddress(d.endereco).replace(/;/g, ","); 
-                let telefone = d.whatsapp_numero.replace('@c.us', '');
+                let telefone = (d.whatsapp_numero || "").replace('@c.us', '');
+                let cliente = (d.cliente_nome || "Cliente").replace(/;/g, "");
+                let pagamento = (d.metodo_pagamento || "Não informado").replace(/;/g, "");
+                let statusTraduzido = d.status === 'pendente' ? 'Cozinha' : (d.status === 'em_entrega' ? 'Na Rua' : 'Concluído');
                 
+                // Tratamento de Data e Hora
                 const dtCriacao = new Date(d.created_at);
                 const dataFormatada = dtCriacao.toLocaleDateString('pt-BR');
-                const diaSemana = dtCriacao.toLocaleDateString('pt-BR', {weekday:'long'});
+                const horaFormatada = dtCriacao.toLocaleTimeString('pt-BR');
                 
+                // Cálculos de Tempo exatos (Igual ao time_to_delivery_minutes do sistema antigo)
                 let tCoz = '-', tRua = '-', tTot = '-';
-                if (d.saiu_entrega_em) tCoz = Math.floor((new Date(d.saiu_entrega_em) - dtCriacao) / 60000);
+                if (d.saiu_entrega_em) {
+                    tCoz = Math.floor((new Date(d.saiu_entrega_em) - dtCriacao) / 60000);
+                }
                 if (d.concluido_em && d.saiu_entrega_em) {
                     tRua = Math.floor((new Date(d.concluido_em) - new Date(d.saiu_entrega_em)) / 60000);
                     tTot = Math.floor((new Date(d.concluido_em) - dtCriacao) / 60000);
                 }
 
-                csv += `${dataFormatada};${diaSemana};${d.cliente_nome};${telefone};${itens};${d.status};${tCoz};${tRua};${tTot};${endereco}\n`;
+                // Monta a linha do Excel
+                csv += `${dataFormatada};${horaFormatada};${cliente};${telefone};${endereco};${itens};${pagamento};${statusTraduzido};${tCoz};${tRua};${tTot}\n`;
             });
 
+            // Força o formato UTF-8 para o Excel brasileiro ler acentos corretamente
             const blob = new Blob(["\uFEFF"+csv], {type: 'text/csv;charset=utf-8;'});
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `Relatorio_Tempos_Pizzaria_${new Date().toISOString().split('T')[0]}.csv`;
+            a.download = `Exportacao_Vendas_${new Date().toISOString().split('T')[0]}.csv`;
             document.body.appendChild(a);
             a.click();
         }
@@ -463,3 +481,4 @@
     </script>
 </body>
 </html>
+
