@@ -114,7 +114,7 @@
                 refreshData();
             }).subscribe();
 
-            // Backup Anti-F5: Roda a cada 1 minuto
+            // Backup Anti-F5: Roda a cada 60 segs (Otimizado)
             setInterval(() => { refreshData(); }, 60000);
         }
 
@@ -128,7 +128,6 @@
                 const changed = JSON.stringify(data) !== JSON.stringify(dbData);
                 dbData = data;
                 
-                // Atualiza a UI se houve mudança OU se estiver na Cozinha (para o reloginho andar)
                 if (changed || currentView === 'dashboard') {
                     updateUI();
                 }
@@ -138,7 +137,7 @@
         function updateUI() {
             updateCounters();
             if (currentView === 'dashboard') renderDashboard();
-            else renderChatList(); // Se for o chat, essa função re-renderiza sem quebrar a rolagem
+            else renderChatList(); 
         }
 
         function updateCounters() {
@@ -148,7 +147,7 @@
             document.getElementById('count-street').innerText = street;
         }
 
-        // --- DASHBOARD COM CRONÔMETROS ---
+        // --- DASHBOARD COM MAPS CLICÁVEL ---
         function renderDashboard() {
             const grid = document.getElementById('grid-cards');
             grid.innerHTML = '';
@@ -170,9 +169,13 @@
                 const timeStr = new Date(item.created_at).toLocaleTimeString().slice(0,5);
                 const address = cleanAddress(item.endereco);
                 
-                // LÓGICA DO CRONÔMETRO DE COZINHA E RUA
+                // CRIAÇÃO DO LINK DO GOOGLE MAPS
+                // Transforma espaços e caracteres especiais em formato de URL
+                const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+                
+                // LÓGICA DO CRONÔMETRO
                 let timerBadge = '';
-                let borderClass = 'border-slate-700'; // Borda padrão
+                let borderClass = 'border-slate-700'; 
 
                 if (item.status === 'pendente') {
                     const diffMin = Math.floor((agora - new Date(item.created_at)) / 60000);
@@ -200,7 +203,7 @@
                     timerBadge = `<span class="text-[10px] bg-slate-900 px-2 py-1 rounded text-slate-500 border border-slate-700 shadow-inner flex items-center gap-1">Total: ${totalTime}m</span>`;
                 }
 
-                // ITENS DA PIZZA
+                // ITENS
                 let itemsHtml = '';
                 if(item.itens?.itens) {
                     item.itens.itens.forEach(i => itemsHtml += `<div class="flex justify-between text-sm py-1 border-b border-slate-700/50"><span class="text-yellow-500 font-bold">${i.qtd}x</span> <span class="text-slate-200">${i.item}</span></div>`);
@@ -214,6 +217,7 @@
                 const card = document.createElement('div');
                 card.className = `bg-slate-800 rounded-xl border ${borderClass} p-4 flex flex-col relative card shadow-lg`;
                 
+                // HTML do Cartão (agora com o endereço sendo um link <a>)
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <div>
@@ -222,8 +226,17 @@
                         </div>
                         ${timerBadge}
                     </div>
+                    
                     <div class="bg-slate-900/50 rounded p-2 mb-2 flex-1 overflow-y-auto max-h-32 scrollbar-thin">${itemsHtml}</div>
-                    <div class="text-xs text-slate-400 flex gap-1 mb-1"><span class="material-icons text-[12px]">place</span> <span class="truncate">${address}</span></div>
+                    
+                    <div class="text-xs text-slate-400 flex gap-1 mb-2 items-center">
+                        <span class="material-icons text-[14px] text-blue-400">place</span> 
+                        ${address === 'Retirada / Balcão' || address === 'Não informado' 
+                            ? `<span class="truncate">${address}</span>` 
+                            : `<a href="${mapsUrl}" target="_blank" class="truncate hover:text-blue-300 hover:underline transition" title="Abrir no Google Maps">${address}</a>`
+                        }
+                    </div>
+                    
                     <div class="flex gap-2 mt-auto">
                         <button onclick="goToChat('${item.whatsapp_numero}')" class="bg-slate-700 hover:bg-slate-600 px-3 rounded text-slate-300 transition" title="Abrir Chat"><span class="material-icons text-sm">chat</span></button>
                         ${btn}
@@ -238,7 +251,6 @@
             const list = document.getElementById('contact-list');
             const term = document.getElementById('search-contact').value.toLowerCase();
             
-            // Só limpa e re-desenha a lista da esquerda
             list.innerHTML = '';
 
             const chats = {};
@@ -281,7 +293,6 @@
                 list.appendChild(el);
             });
 
-            // Se tem um chat aberto, atualiza as mensagens DENTRO dele sem piscar
             if (selectedChatPhone && chats[selectedChatPhone]) {
                 renderMessages(chats[selectedChatPhone].raw);
             }
@@ -294,18 +305,17 @@
             document.getElementById('chat-name').innerText = name;
             document.getElementById('chat-phone').innerText = phone.replace('@c.us', '');
             
-            renderChatList(); // Marca o item como ativo na lista da esquerda
+            renderChatList(); 
             
             const container = document.getElementById('chat-messages');
-            container.innerHTML = ''; // Força limpeza ao abrir pela primeira vez
+            container.innerHTML = ''; 
             renderMessages(messages);
-            container.scrollTop = container.scrollHeight; // Desce pro fim
+            container.scrollTop = container.scrollHeight; 
         }
 
         function renderMessages(messages) {
             const container = document.getElementById('chat-messages');
             
-            // Verifica se a quantidade de mensagens mudou para evitar piscar atoa
             if(container.childElementCount > 1 && messages.length === window.lastMsgCount) return;
             window.lastMsgCount = messages.length;
 
@@ -345,7 +355,6 @@
                 }
                 container.appendChild(div);
             });
-            // Mantém a barra de rolagem embaixo ao chegar mensagens novas
             container.scrollTop = container.scrollHeight;
         }
 
@@ -407,7 +416,7 @@
         }
 
         function cleanAddress(raw) {
-            if (!raw || raw === "Não informado") return "Retirada";
+            if (!raw || raw === "Não informado") return "Retirada / Balcão";
             try {
                 if (raw.trim().startsWith('{')) {
                     const o = JSON.parse(raw);
@@ -417,7 +426,6 @@
             return raw.replace(/{|}|"/g, '').replace(/,/g, ', ');
         }
         
-        // --- RELATÓRIO EXCEL COM TEMPOS DE PREPARO ---
         function exportExcel() {
             let csv = "Data;Dia da Semana;Cliente;Telefone;Pedido;Status;Tempo Cozinha (min);Tempo Rua (min);Tempo Total (min);Endereco\n";
             dbData.forEach(d => {
@@ -432,11 +440,8 @@
                 const dataFormatada = dtCriacao.toLocaleDateString('pt-BR');
                 const diaSemana = dtCriacao.toLocaleDateString('pt-BR', {weekday:'long'});
                 
-                // Cálculos de Tempo
                 let tCoz = '-', tRua = '-', tTot = '-';
-                if (d.saiu_entrega_em) {
-                    tCoz = Math.floor((new Date(d.saiu_entrega_em) - dtCriacao) / 60000);
-                }
+                if (d.saiu_entrega_em) tCoz = Math.floor((new Date(d.saiu_entrega_em) - dtCriacao) / 60000);
                 if (d.concluido_em && d.saiu_entrega_em) {
                     tRua = Math.floor((new Date(d.concluido_em) - new Date(d.saiu_entrega_em)) / 60000);
                     tTot = Math.floor((new Date(d.concluido_em) - dtCriacao) / 60000);
