@@ -11,22 +11,18 @@
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f1f5f9; overflow: hidden; }
         
-        /* Dashboard */
         .card { transition: all 0.2s; }
         .card:hover { transform: translateY(-3px); }
         
-        /* Chat Layout */
         .chat-layout { height: calc(100vh - 80px); display: flex; }
         .chat-sidebar { width: 350px; background-color: #1e293b; border-right: 1px solid #334155; overflow-y: auto; }
         .chat-main { flex: 1; background-color: #0b1120; background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 20px 20px; display: flex; flex-direction: column; }
         .contact-item:hover, .contact-item.active { background-color: #334155; cursor: pointer; }
         
-        /* Bolhas */
         .bubble { max-width: 70%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.4; position: relative; margin-bottom: 8px; }
         .bubble-user { background-color: #374151; color: #fff; align-self: flex-start; border-top-left-radius: 0; }
         .bubble-order { background-color: #422006; color: #fde047; align-self: flex-end; border-top-right-radius: 0; border: 1px solid #ca8a04; }
         
-        /* Divisor de Data (Novo!) */
         .date-divider { display: flex; justify-content: center; margin: 20px 0 10px 0; }
         .date-badge { background-color: #1e293b; color: #94a3b8; font-size: 11px; padding: 4px 12px; border-radius: 99px; border: 1px solid #334155; text-transform: uppercase; font-weight: bold; }
 
@@ -39,7 +35,7 @@
 
     <header class="bg-slate-900 border-b border-slate-700 h-16 flex items-center justify-between px-4 shrink-0 z-50">
         <div class="flex items-center gap-4">
-            <div class="h-10 w-10 rounded-full bg-yellow-500 flex items-center justify-center font-bold text-slate-900 text-lg">P</div>
+            <div class="h-10 w-10 rounded-full bg-yellow-500 flex items-center justify-center font-bold text-slate-900 text-lg shadow-lg">P</div>
             <div class="flex bg-slate-800 rounded-lg p-1 gap-1">
                 <button onclick="switchView('dashboard')" id="btn-dash" class="px-4 py-1.5 rounded text-sm font-bold bg-slate-700 text-yellow-500 shadow transition flex items-center gap-2">
                     <span class="material-icons text-sm">dashboard</span> Cozinha
@@ -79,7 +75,7 @@
             <div id="contact-list" class="flex-1 overflow-y-auto"></div>
         </div>
         <div class="chat-main">
-            <div id="chat-header" class="h-14 bg-slate-800 border-b border-slate-700 flex items-center px-4 justify-between hidden">
+            <div id="chat-header" class="h-14 bg-slate-800 border-b border-slate-700 flex items-center px-4 justify-between hidden shadow-md z-10">
                 <div class="flex items-center gap-3">
                     <div class="h-9 w-9 rounded-full bg-slate-600 flex items-center justify-center text-white font-bold" id="chat-avatar">?</div>
                     <div>
@@ -97,7 +93,7 @@
         </div>
     </div>
 
-    <button onclick="exportExcel()" id="btn-export" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white h-12 w-12 rounded-full shadow-xl flex items-center justify-center transition hover:scale-110 z-50">
+    <button onclick="exportExcel()" id="btn-export" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white h-12 w-12 rounded-full shadow-xl flex items-center justify-center transition hover:scale-110 z-50" title="Baixar Relatório e Tempos">
         <span class="material-icons">download</span>
     </button>
 
@@ -113,12 +109,13 @@
 
         function init() {
             refreshData();
-            // 1. Realtime
+            
             client.channel('any').on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, () => {
                 refreshData();
             }).subscribe();
-            // 2. Backup Anti-F5
-            setInterval(() => { refreshData(); }, 4000);
+
+            // Backup Anti-F5: Roda a cada 1 minuto
+            setInterval(() => { refreshData(); }, 60000);
         }
 
         async function refreshData() {
@@ -128,8 +125,11 @@
                 .limit(500);
             
             if (!error && data) {
-                if (JSON.stringify(data) !== JSON.stringify(dbData)) {
-                    dbData = data;
+                const changed = JSON.stringify(data) !== JSON.stringify(dbData);
+                dbData = data;
+                
+                // Atualiza a UI se houve mudança OU se estiver na Cozinha (para o reloginho andar)
+                if (changed || currentView === 'dashboard') {
                     updateUI();
                 }
             }
@@ -138,7 +138,7 @@
         function updateUI() {
             updateCounters();
             if (currentView === 'dashboard') renderDashboard();
-            else renderChatList();
+            else renderChatList(); // Se for o chat, essa função re-renderiza sem quebrar a rolagem
         }
 
         function updateCounters() {
@@ -148,7 +148,7 @@
             document.getElementById('count-street').innerText = street;
         }
 
-        // --- DASHBOARD ---
+        // --- DASHBOARD COM CRONÔMETROS ---
         function renderDashboard() {
             const grid = document.getElementById('grid-cards');
             grid.innerHTML = '';
@@ -164,29 +164,66 @@
                 return;
             }
 
+            const agora = new Date();
+
             filtered.forEach(item => {
-                const card = document.createElement('div');
-                card.className = "bg-slate-800 rounded-xl border border-slate-700 p-4 flex flex-col relative card";
-                
-                const time = new Date(item.created_at).toLocaleTimeString().slice(0,5);
+                const timeStr = new Date(item.created_at).toLocaleTimeString().slice(0,5);
                 const address = cleanAddress(item.endereco);
                 
+                // LÓGICA DO CRONÔMETRO DE COZINHA E RUA
+                let timerBadge = '';
+                let borderClass = 'border-slate-700'; // Borda padrão
+
+                if (item.status === 'pendente') {
+                    const diffMin = Math.floor((agora - new Date(item.created_at)) / 60000);
+                    let corTxt = 'text-green-400';
+                    if (diffMin > 40) {
+                        corTxt = 'text-red-500 font-bold animate-pulse';
+                        borderClass = 'border-red-500/50';
+                    } else if (diffMin > 20) {
+                        corTxt = 'text-yellow-400';
+                        borderClass = 'border-yellow-500/50';
+                    }
+                    timerBadge = `<span class="text-[10px] bg-slate-900 px-2 py-1 rounded ${corTxt} border border-slate-700 flex items-center gap-1 shadow-inner"><span class="material-icons text-[12px]">oven_gen</span> Coz: ${diffMin}m</span>`;
+                
+                } else if (item.status === 'em_entrega') {
+                    const saiuEm = item.saiu_entrega_em ? new Date(item.saiu_entrega_em) : new Date(item.created_at);
+                    const diffRua = Math.floor((agora - saiuEm) / 60000);
+                    borderClass = 'border-blue-500/50';
+                    timerBadge = `<span class="text-[10px] bg-slate-900 px-2 py-1 rounded text-blue-400 border border-slate-700 flex items-center gap-1 shadow-inner"><span class="material-icons text-[12px]">two_wheeler</span> Rua: ${diffRua}m</span>`;
+                
+                } else if (item.status === 'concluido') {
+                    let totalTime = '?';
+                    if(item.concluido_em && item.created_at) {
+                        totalTime = Math.floor((new Date(item.concluido_em) - new Date(item.created_at)) / 60000);
+                    }
+                    timerBadge = `<span class="text-[10px] bg-slate-900 px-2 py-1 rounded text-slate-500 border border-slate-700 shadow-inner flex items-center gap-1">Total: ${totalTime}m</span>`;
+                }
+
+                // ITENS DA PIZZA
                 let itemsHtml = '';
                 if(item.itens?.itens) {
                     item.itens.itens.forEach(i => itemsHtml += `<div class="flex justify-between text-sm py-1 border-b border-slate-700/50"><span class="text-yellow-500 font-bold">${i.qtd}x</span> <span class="text-slate-200">${i.item}</span></div>`);
                 }
 
+                // BOTÕES
                 let btn = '';
                 if(item.status === 'pendente') btn = `<button onclick="setStatus('${item.id}', 'em_entrega')" class="mt-3 w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded text-sm transition">SAIU P/ ENTREGA</button>`;
                 else if(item.status === 'em_entrega') btn = `<button onclick="setStatus('${item.id}', 'concluido')" class="mt-3 w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded text-sm transition">FINALIZAR</button>`;
 
+                const card = document.createElement('div');
+                card.className = `bg-slate-800 rounded-xl border ${borderClass} p-4 flex flex-col relative card shadow-lg`;
+                
                 card.innerHTML = `
-                    <div class="flex justify-between mb-2">
-                        <h3 class="font-bold text-white truncate max-w-[150px]">${item.cliente_nome}</h3>
-                        <span class="text-xs bg-slate-900 px-2 py-1 rounded text-slate-400">${time}</span>
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-white truncate max-w-[140px] leading-tight">${item.cliente_nome}</h3>
+                            <span class="text-[10px] text-slate-500">${timeStr}</span>
+                        </div>
+                        ${timerBadge}
                     </div>
                     <div class="bg-slate-900/50 rounded p-2 mb-2 flex-1 overflow-y-auto max-h-32 scrollbar-thin">${itemsHtml}</div>
-                    <div class="text-xs text-slate-400 flex gap-1 mb-1"><span class="material-icons text-[12px]">place</span> ${address}</div>
+                    <div class="text-xs text-slate-400 flex gap-1 mb-1"><span class="material-icons text-[12px]">place</span> <span class="truncate">${address}</span></div>
                     <div class="flex gap-2 mt-auto">
                         <button onclick="goToChat('${item.whatsapp_numero}')" class="bg-slate-700 hover:bg-slate-600 px-3 rounded text-slate-300 transition" title="Abrir Chat"><span class="material-icons text-sm">chat</span></button>
                         ${btn}
@@ -200,6 +237,8 @@
         function renderChatList() {
             const list = document.getElementById('contact-list');
             const term = document.getElementById('search-contact').value.toLowerCase();
+            
+            // Só limpa e re-desenha a lista da esquerda
             list.innerHTML = '';
 
             const chats = {};
@@ -209,8 +248,7 @@
                         name: d.cliente_nome,
                         phone: d.whatsapp_numero,
                         lastMsgDate: d.created_at,
-                        // Mostra o texto real da conversa na prévia
-                        preview: d.status === 'log_conversa' ? (d.itens?.mensagem || 'Mensagem') : '📝 Pedido realizado',
+                        preview: d.status === 'log_conversa' ? (d.itens?.mensagem || 'Mensagem') : '📝 Pedido atualizado',
                         raw: []
                     };
                 }
@@ -243,6 +281,7 @@
                 list.appendChild(el);
             });
 
+            // Se tem um chat aberto, atualiza as mensagens DENTRO dele sem piscar
             if (selectedChatPhone && chats[selectedChatPhone]) {
                 renderMessages(chats[selectedChatPhone].raw);
             }
@@ -254,27 +293,34 @@
             document.getElementById('chat-avatar').innerText = name ? name[0] : '#';
             document.getElementById('chat-name').innerText = name;
             document.getElementById('chat-phone').innerText = phone.replace('@c.us', '');
-            renderChatList(); 
+            
+            renderChatList(); // Marca o item como ativo na lista da esquerda
+            
+            const container = document.getElementById('chat-messages');
+            container.innerHTML = ''; // Força limpeza ao abrir pela primeira vez
             renderMessages(messages);
+            container.scrollTop = container.scrollHeight; // Desce pro fim
         }
 
-        // --- RENDERIZAÇÃO INTELIGENTE COM DATAS ---
         function renderMessages(messages) {
             const container = document.getElementById('chat-messages');
+            
+            // Verifica se a quantidade de mensagens mudou para evitar piscar atoa
+            if(container.childElementCount > 1 && messages.length === window.lastMsgCount) return;
+            window.lastMsgCount = messages.length;
+
             container.innerHTML = '';
             
             const sorted = messages.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
             let lastDateLabel = "";
 
             sorted.forEach(msg => {
-                // FILTRO: Não mostra 'concluido' ou 'em_entrega' pra não poluir
                 if (msg.status === 'concluido' || msg.status === 'em_entrega') return;
 
-                const msgDate = new Date(msg.created_at);
-                const time = msgDate.toLocaleTimeString().slice(0,5);
+                const msgDateObj = new Date(msg.created_at);
+                const time = msgDateObj.toLocaleTimeString().slice(0,5);
                 const dateLabel = formatDateLabel(msg.created_at);
 
-                // Insere Divisor de Data se mudou o dia
                 if (dateLabel !== lastDateLabel) {
                     const divider = document.createElement('div');
                     divider.className = "date-divider";
@@ -284,28 +330,25 @@
                 }
 
                 const div = document.createElement('div');
-                
                 if (msg.status === 'log_conversa') {
-                    // MENSAGEM DO CLIENTE (TEXTO)
                     div.className = "bubble bubble-user";
                     let texto = msg.itens?.mensagem || "...";
                     div.innerHTML = `${texto}<div class="text-[10px] text-slate-400 text-right mt-1">${time}</div>`;
                 } else if (msg.status === 'pendente') {
-                    // PEDIDO (AMARELO)
                     div.className = "bubble bubble-order";
-                    let itemsTxt = msg.itens?.itens?.map(i => `${i.qtd} ${i.item}`).join('<br>') || "Pedido Criado";
+                    let itemsTxt = msg.itens?.itens?.map(i => `${i.qtd} ${i.item}`).join('<br>') || "Pedido Aberto";
                     div.innerHTML = `
-                        <div class="font-bold text-xs mb-1 uppercase tracking-wider text-yellow-600">📝 Pedido Aberto</div>
+                        <div class="font-bold text-xs mb-1 uppercase tracking-wider text-yellow-600 flex items-center gap-1"><span class="material-icons text-[14px]">receipt_long</span> PEDIDO ABERTO</div>
                         <div>${itemsTxt}</div>
                         <div class="text-[10px] text-yellow-800 text-right mt-1">${time}</div>
                     `;
                 }
                 container.appendChild(div);
             });
+            // Mantém a barra de rolagem embaixo ao chegar mensagens novas
             container.scrollTop = container.scrollHeight;
         }
 
-        // Formata data: HOJE, ONTEM, TERÇA-FEIRA...
         function formatDateLabel(dateStr) {
             const d = new Date(dateStr);
             const today = new Date();
@@ -329,6 +372,7 @@
             if (view === 'dashboard') {
                 btnDash.className = "px-4 py-1.5 rounded text-sm font-bold bg-slate-700 text-yellow-500 shadow transition flex items-center gap-2";
                 btnChat.className = "px-4 py-1.5 rounded text-sm font-medium text-slate-400 hover:text-white transition flex items-center gap-2";
+                renderDashboard();
             } else {
                 btnDash.className = "px-4 py-1.5 rounded text-sm font-medium text-slate-400 hover:text-white transition flex items-center gap-2";
                 btnChat.className = "px-4 py-1.5 rounded text-sm font-bold bg-slate-700 text-yellow-500 shadow transition flex items-center gap-2";
@@ -351,7 +395,7 @@
                     const allMsgs = dbData.filter(d => d.whatsapp_numero === phone);
                     openChat(phone, userData.cliente_nome, allMsgs);
                 }
-            }, 100);
+            }, 50);
         }
 
         async function setStatus(id, status) {
@@ -373,18 +417,39 @@
             return raw.replace(/{|}|"/g, '').replace(/,/g, ', ');
         }
         
+        // --- RELATÓRIO EXCEL COM TEMPOS DE PREPARO ---
         function exportExcel() {
-            let csv = "Data;Cliente;Pedido;Status\n";
+            let csv = "Data;Dia da Semana;Cliente;Telefone;Pedido;Status;Tempo Cozinha (min);Tempo Rua (min);Tempo Total (min);Endereco\n";
             dbData.forEach(d => {
                 if(d.status === 'log_conversa') return;
+                
                 let itens = d.itens?.itens?.map(i=>`${i.qtd} ${i.item}`).join(" + ") || "";
-                csv += `${new Date(d.created_at).toLocaleDateString()};${d.cliente_nome};${itens};${d.status}\n`;
+                itens = itens.replace(/;/g, " ").replace(/\n/g, " ");
+                let endereco = cleanAddress(d.endereco).replace(/;/g, ","); 
+                let telefone = d.whatsapp_numero.replace('@c.us', '');
+                
+                const dtCriacao = new Date(d.created_at);
+                const dataFormatada = dtCriacao.toLocaleDateString('pt-BR');
+                const diaSemana = dtCriacao.toLocaleDateString('pt-BR', {weekday:'long'});
+                
+                // Cálculos de Tempo
+                let tCoz = '-', tRua = '-', tTot = '-';
+                if (d.saiu_entrega_em) {
+                    tCoz = Math.floor((new Date(d.saiu_entrega_em) - dtCriacao) / 60000);
+                }
+                if (d.concluido_em && d.saiu_entrega_em) {
+                    tRua = Math.floor((new Date(d.concluido_em) - new Date(d.saiu_entrega_em)) / 60000);
+                    tTot = Math.floor((new Date(d.concluido_em) - dtCriacao) / 60000);
+                }
+
+                csv += `${dataFormatada};${diaSemana};${d.cliente_nome};${telefone};${itens};${d.status};${tCoz};${tRua};${tTot};${endereco}\n`;
             });
+
             const blob = new Blob(["\uFEFF"+csv], {type: 'text/csv;charset=utf-8;'});
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = "Relatorio.csv";
+            a.download = `Relatorio_Tempos_Pizzaria_${new Date().toISOString().split('T')[0]}.csv`;
             document.body.appendChild(a);
             a.click();
         }
