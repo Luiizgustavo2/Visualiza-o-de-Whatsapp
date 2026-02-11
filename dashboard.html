@@ -93,7 +93,7 @@
         </div>
     </div>
 
-    <button onclick="exportExcel()" id="btn-export" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white h-12 w-12 rounded-full shadow-xl flex items-center justify-center transition hover:scale-110 z-50" title="Baixar Relatório e Tempos">
+    <button onclick="exportExcel()" id="btn-export" class="fixed bottom-6 right-6 bg-green-600 hover:bg-green-500 text-white h-12 w-12 rounded-full shadow-xl flex items-center justify-center transition hover:scale-110 z-50" title="Baixar Relatório Completo">
         <span class="material-icons">download</span>
     </button>
 
@@ -114,7 +114,7 @@
                 refreshData();
             }).subscribe();
 
-            // Backup Anti-F5: Roda a cada 60 segs (Otimizado)
+            // Backup Anti-F5
             setInterval(() => { refreshData(); }, 60000);
         }
 
@@ -169,11 +169,8 @@
                 const timeStr = new Date(item.created_at).toLocaleTimeString().slice(0,5);
                 const address = cleanAddress(item.endereco);
                 
-                // CRIAÇÃO DO LINK DO GOOGLE MAPS
-                // Transforma espaços e caracteres especiais em formato de URL
-                const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+                const mapsUrl = `http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(address)}`;
                 
-                // LÓGICA DO CRONÔMETRO
                 let timerBadge = '';
                 let borderClass = 'border-slate-700'; 
 
@@ -203,13 +200,11 @@
                     timerBadge = `<span class="text-[10px] bg-slate-900 px-2 py-1 rounded text-slate-500 border border-slate-700 shadow-inner flex items-center gap-1">Total: ${totalTime}m</span>`;
                 }
 
-                // ITENS
                 let itemsHtml = '';
                 if(item.itens?.itens) {
                     item.itens.itens.forEach(i => itemsHtml += `<div class="flex justify-between text-sm py-1 border-b border-slate-700/50"><span class="text-yellow-500 font-bold">${i.qtd}x</span> <span class="text-slate-200">${i.item}</span></div>`);
                 }
 
-                // BOTÕES
                 let btn = '';
                 if(item.status === 'pendente') btn = `<button onclick="setStatus('${item.id}', 'em_entrega')" class="mt-3 w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 rounded text-sm transition">SAIU P/ ENTREGA</button>`;
                 else if(item.status === 'em_entrega') btn = `<button onclick="setStatus('${item.id}', 'concluido')" class="mt-3 w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded text-sm transition">FINALIZAR</button>`;
@@ -217,7 +212,6 @@
                 const card = document.createElement('div');
                 card.className = `bg-slate-800 rounded-xl border ${borderClass} p-4 flex flex-col relative card shadow-lg`;
                 
-                // HTML do Cartão (agora com o endereço sendo um link <a>)
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <div>
@@ -268,7 +262,7 @@
             });
 
             const sortedChats = Object.values(chats)
-                .filter(c => c.name.toLowerCase().includes(term) || c.phone.includes(term))
+                .filter(c => (c.name || '').toLowerCase().includes(term) || c.phone.includes(term))
                 .sort((a,b) => new Date(b.lastMsgDate) - new Date(a.lastMsgDate));
 
             sortedChats.forEach(c => {
@@ -284,7 +278,7 @@
                     <div class="h-10 w-10 rounded-full bg-slate-600 flex items-center justify-center text-white font-bold shrink-0">${letter}</div>
                     <div class="flex-1 min-w-0">
                         <div class="flex justify-between">
-                            <h4 class="text-sm font-bold text-white truncate">${c.name}</h4>
+                            <h4 class="text-sm font-bold text-white truncate">${c.name || 'Cliente'}</h4>
                             <span class="text-[10px] text-slate-500">${time}</span>
                         </div>
                         <p class="text-xs text-slate-400 truncate">${c.preview}</p>
@@ -302,7 +296,7 @@
             selectedChatPhone = phone;
             document.getElementById('chat-header').classList.remove('hidden');
             document.getElementById('chat-avatar').innerText = name ? name[0] : '#';
-            document.getElementById('chat-name').innerText = name;
+            document.getElementById('chat-name').innerText = name || 'Cliente';
             document.getElementById('chat-phone').innerText = phone.replace('@c.us', '');
             
             renderChatList(); 
@@ -420,65 +414,62 @@
             try {
                 if (raw.trim().startsWith('{')) {
                     const o = JSON.parse(raw);
-                    return `${o.rua}, ${o.numero} - ${o.bairro}`.replace('undefined', '');
+                    return `${o.rua || ''}, ${o.numero || ''} - ${o.bairro || ''}`.replace('undefined', '');
                 }
             } catch (e) {}
             return raw.replace(/{|}|"/g, '').replace(/,/g, ', ');
         }
         
-       // --- RELATÓRIO EXCEL INSPIRADO NO SISTEMA ANTIGO ---
+        // --- RELATÓRIO EXCEL EXATAMENTE COMO VOCÊ PEDIU ---
         function exportExcel() {
-            // Cabeçalho baseado na estrutura do Sale_export.csv
-            let csv = "Data;Hora;Nome do Cliente;Telefone;Endereco;Itens do Pedido;Metodo de Pagamento;Status;Tempo Cozinha (min);Tempo Rua (min);Tempo Total (min)\n";
-            
-            dbData.forEach(d => {
-                if(d.status === 'log_conversa') return; // Ignora as conversas, exporta só pedidos
+            try {
+                let csv = "Data;Hora;Nome do Cliente;Telefone;Endereco;Itens do Pedido;Metodo de Pagamento;Status;Tempo Cozinha (min);Tempo Rua (min);Tempo Total (min)\n";
                 
-                // Formatação dos Itens (Semelhante ao que você tinha)
-                let itens = "";
-                if (d.itens?.itens) {
-                    itens = d.itens.itens.map(i => `${i.qtd}x ${i.item}`).join(" | ");
-                }
-                itens = itens.replace(/;/g, ",").replace(/\n/g, " "); // Proteção para não quebrar colunas
-                
-                // Tratamento de Texto
-                let endereco = cleanAddress(d.endereco).replace(/;/g, ","); 
-                let telefone = (d.whatsapp_numero || "").replace('@c.us', '');
-                let cliente = (d.cliente_nome || "Cliente").replace(/;/g, "");
-                let pagamento = (d.metodo_pagamento || "Não informado").replace(/;/g, "");
-                let statusTraduzido = d.status === 'pendente' ? 'Cozinha' : (d.status === 'em_entrega' ? 'Na Rua' : 'Concluído');
-                
-                // Tratamento de Data e Hora
-                const dtCriacao = new Date(d.created_at);
-                const dataFormatada = dtCriacao.toLocaleDateString('pt-BR');
-                const horaFormatada = dtCriacao.toLocaleTimeString('pt-BR');
-                
-                // Cálculos de Tempo exatos (Igual ao time_to_delivery_minutes do sistema antigo)
-                let tCoz = '-', tRua = '-', tTot = '-';
-                if (d.saiu_entrega_em) {
-                    tCoz = Math.floor((new Date(d.saiu_entrega_em) - dtCriacao) / 60000);
-                }
-                if (d.concluido_em && d.saiu_entrega_em) {
-                    tRua = Math.floor((new Date(d.concluido_em) - new Date(d.saiu_entrega_em)) / 60000);
-                    tTot = Math.floor((new Date(d.concluido_em) - dtCriacao) / 60000);
-                }
+                dbData.forEach(d => {
+                    if(d.status === 'log_conversa') return;
+                    
+                    let itens = "";
+                    if (d.itens && d.itens.itens) {
+                        itens = d.itens.itens.map(i => `${i.qtd}x ${i.item}`).join(" | ");
+                    }
+                    itens = itens.replace(/;/g, ",").replace(/\n/g, " ");
+                    
+                    let endereco = cleanAddress(d.endereco).replace(/;/g, ","); 
+                    let telefone = d.whatsapp_numero ? d.whatsapp_numero.replace('@c.us', '') : '';
+                    let cliente = (d.cliente_nome || "Cliente").replace(/;/g, "");
+                    let pagamento = (d.metodo_pagamento || "Não informado").replace(/;/g, "");
+                    let statusTraduzido = d.status === 'pendente' ? 'Cozinha' : (d.status === 'em_entrega' ? 'Na Rua' : 'Concluído');
+                    
+                    const dtCriacao = new Date(d.created_at);
+                    const dataFormatada = dtCriacao.toLocaleDateString('pt-BR');
+                    const horaFormatada = dtCriacao.toLocaleTimeString('pt-BR').slice(0,5);
+                    
+                    let tCoz = '-', tRua = '-', tTot = '-';
+                    if (d.saiu_entrega_em) {
+                        tCoz = Math.floor((new Date(d.saiu_entrega_em) - dtCriacao) / 60000);
+                    }
+                    if (d.concluido_em && d.saiu_entrega_em) {
+                        tRua = Math.floor((new Date(d.concluido_em) - new Date(d.saiu_entrega_em)) / 60000);
+                        tTot = Math.floor((new Date(d.concluido_em) - dtCriacao) / 60000);
+                    }
 
-                // Monta a linha do Excel
-                csv += `${dataFormatada};${horaFormatada};${cliente};${telefone};${endereco};${itens};${pagamento};${statusTraduzido};${tCoz};${tRua};${tTot}\n`;
-            });
+                    csv += `${dataFormatada};${horaFormatada};${cliente};${telefone};${endereco};${itens};${pagamento};${statusTraduzido};${tCoz};${tRua};${tTot}\n`;
+                });
 
-            // Força o formato UTF-8 para o Excel brasileiro ler acentos corretamente
-            const blob = new Blob(["\uFEFF"+csv], {type: 'text/csv;charset=utf-8;'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `Exportacao_Vendas_${new Date().toISOString().split('T')[0]}.csv`;
-            document.body.appendChild(a);
-            a.click();
+                const blob = new Blob(["\uFEFF"+csv], {type: 'text/csv;charset=utf-8;'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Exportacao_Vendas_Gordo_${new Date().toISOString().split('T')[0]}.csv`;
+                document.body.appendChild(a);
+                a.click();
+            } catch (err) {
+                console.error("Erro ao gerar Excel:", err);
+                alert("Erro ao baixar relatório: " + err.message);
+            }
         }
 
         init();
     </script>
 </body>
 </html>
-
